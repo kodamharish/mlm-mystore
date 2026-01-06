@@ -409,4 +409,33 @@ class UserNotificationStatus(models.Model):
 
 
 
+class UserProperty(models.Model):
+    # STATUS_CHOICES = [
+    #     ('booked', 'Booked'),
+    #     ('purchased', 'Purchased'),
+    # ]
+    # STATUS_CHOICES = [
+    #     ('booked', 'Booked'),
+    #     ('sold', 'Sold'),
+    # ]
+
+    STATUS_CHOICES = (
+        ('booked', 'Booked'),
+        ('purchased', 'Purchased'),
+    )
+
+    user = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name='user_properties')
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='user_properties')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    booking_date = models.DateField(null=True, blank=True)
+    purchase_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'property')  # prevent duplicate booking/purchase by same user
+
+    def __str__(self):
+        return f"{self.user.first_name} - {self.property.property_title} ({self.status})"
+
+
 
