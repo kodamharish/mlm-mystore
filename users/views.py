@@ -61,10 +61,7 @@ class LoginAPIView_old(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
-
-
-
-
+#Login With Email or Phonenumber
 
 class LoginAPIView(APIView):
     def post(self, request):
@@ -110,7 +107,7 @@ class LoginAPIView(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
-
+# Login With OTP
 class LoginAPIView1(APIView):
     """
     Step 1: Send 6-digit OTP via SMS using only phone_number.
@@ -481,6 +478,83 @@ class AgentsByReferralIdAPIView(APIView):
 
 
 
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import User
+from .serializers import UserSerializer
+from .filters import UserFilter
+from mlm.pagination import GlobalPagination
+
+
+class UserSearchAPIView(APIView):
+
+    def get(self, request):
+        try:
+            # -------------------------------------------------
+            # 1️⃣ BASE QUERYSET
+            # -------------------------------------------------
+            queryset = User.objects.all()
+
+            # -------------------------------------------------
+            # 2️⃣ APPLY DJANGO FILTERS
+            # -------------------------------------------------
+            filterset = UserFilter(
+                data=request.GET,
+                queryset=queryset
+            )
+
+            if not filterset.is_valid():
+                return Response(
+                    filterset.errors,
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            queryset = filterset.qs
+
+            # -------------------------------------------------
+            # 3️⃣ OPTIMIZE QUERYSET
+            # -------------------------------------------------
+            queryset = queryset.prefetch_related('roles')
+
+            # -------------------------------------------------
+            # 4️⃣ ORDERING
+            # -------------------------------------------------
+            ordering = request.GET.get('ordering')
+            allowed = [
+                'created_at', '-created_at',
+                'first_name', '-first_name',
+                'level_no', '-level_no'
+            ]
+
+            queryset = queryset.order_by(
+                ordering if ordering in allowed else '-created_at'
+            )
+
+            # -------------------------------------------------
+            # 5️⃣ PAGINATION
+            # -------------------------------------------------
+            paginator = GlobalPagination()
+            paginated_queryset = paginator.paginate_queryset(queryset, request)
+
+            serializer = UserSerializer(
+                paginated_queryset,
+                many=True
+            )
+
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+
+
+
 class CountAPIView(APIView):
     def get(self, request):
         one_month_ago = timezone.now() - timedelta(days=30)
@@ -533,6 +607,9 @@ class CountAPIView(APIView):
         }
 
         return Response(counts, status=status.HTTP_200_OK)
+
+
+#Forgot Password
 
 class SendOTPView(APIView):
     def post(self, request):

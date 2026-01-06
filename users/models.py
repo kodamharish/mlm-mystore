@@ -36,9 +36,11 @@ class User(models.Model):
         ('married', 'Married'),
         
     )
+    
+
     VERIFICATION_STATUS = (
         ('pending', 'Pending'),
-        ('approved', 'Approved'),
+        ('verified', 'Verified'),
         ('rejected', 'Rejected'),
         ('suspended', 'Suspended'),
     )
@@ -80,7 +82,7 @@ class User(models.Model):
     cancelled_cheque = models.ImageField(upload_to=temp_directory_path, blank=True, null=True)
     # ========================
 
-    kyc_status = models.CharField(max_length=100,choices=VERIFICATION_STATUS,blank=True, null=True)
+    kyc_status = models.CharField(max_length=100,choices=VERIFICATION_STATUS,default='pending')
     account_holder_name = models.CharField(max_length=255, blank=True, null=True)
     bank_name = models.CharField(max_length=255, blank=True, null=True)
     branch_name = models.CharField(max_length=255, blank=True, null=True)

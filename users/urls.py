@@ -11,6 +11,7 @@ urlpatterns = [
 
     path('users/', UserListCreateView.as_view(), name='user-list-create'),
     path('users/<int:user_id>/', UserDetailView.as_view(), name='user-detail'),
+    path('users/search/', UserSearchAPIView.as_view(), name='users-search'),
 
     path('users/role/<str:role_name>/', UsersByRoleAPIView.as_view(), name='users-by-role'), 
     path('users/status/<str:user_status>/', UsersByStatus.as_view(), name='users-by-status'), 

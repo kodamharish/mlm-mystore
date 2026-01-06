@@ -713,47 +713,93 @@ class ProductDetailView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    # @transaction.atomic
+    # def put(self, request, product_id):
+    #     """
+    #     Nested Update:
+    #     Product + Replace Variants + Add Media
+    #     """
+    #     try:
+    #         product = get_object_or_404(Product, product_id=product_id)
+
+    #         product_data = request.data.get('product', {})
+    #         variants = request.data.get('variants', [])
+    #         media_files = request.FILES.getlist('media')
+
+    #         # 🔄 Update product fields
+    #         for field, value in product_data.items():
+    #             setattr(product, field, value)
+
+    #         product.verification_status = 'pending'
+    #         product.save()
+
+    #         # 🔄 Replace variants
+    #         ProductVariant.objects.filter(product=product).delete()
+    #         for v in variants:
+    #             ProductVariant.objects.create(product=product, **v)
+
+    #         # ➕ Add media
+    #         for file in media_files:
+    #             ProductMedia.objects.create(
+    #                 product=product,
+    #                 media_type='image',
+    #                 file=file
+    #             )
+
+    #         return Response(
+    #             {"message": "Product updated"},
+    #             status=status.HTTP_200_OK
+    #         )
+
+    #     except Exception as e:
+    #         transaction.set_rollback(True)
+    #         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @transaction.atomic
     def put(self, request, product_id):
-        """
-        Nested Update:
-        Product + Replace Variants + Add Media
-        """
         try:
             product = get_object_or_404(Product, product_id=product_id)
 
-            product_data = request.data.get('product', {})
-            variants = request.data.get('variants', [])
+            product_data = request.data.get('product')
+            variants = request.data.get('variants')
             media_files = request.FILES.getlist('media')
 
-            # 🔄 Update product fields
-            for field, value in product_data.items():
-                setattr(product, field, value)
+            # 🔄 Update PRODUCT only if provided
+            if product_data:
+                for field, value in product_data.items():
+                    setattr(product, field, value)
 
-            product.verification_status = 'pending'
-            product.save()
+                product.verification_status = 'pending'
+                product.save()
 
-            # 🔄 Replace variants
-            ProductVariant.objects.filter(product=product).delete()
-            for v in variants:
-                ProductVariant.objects.create(product=product, **v)
+            # 🔄 Update VARIANTS only if explicitly sent
+            if variants is not None:
+                ProductVariant.objects.filter(product=product).delete()
 
-            # ➕ Add media
-            for file in media_files:
-                ProductMedia.objects.create(
-                    product=product,
-                    media_type='image',
-                    file=file
-                )
+                for v in variants:
+                    ProductVariant.objects.create(product=product, **v)
+
+            # ➕ Add MEDIA only if files are sent
+            if media_files:
+                for file in media_files:
+                    ProductMedia.objects.create(
+                        product=product,
+                        media_type='image',
+                        file=file
+                    )
 
             return Response(
-                {"message": "Product updated"},
+                {"message": "Product updated successfully"},
                 status=status.HTTP_200_OK
             )
 
         except Exception as e:
             transaction.set_rollback(True)
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
     def delete(self, request, product_id):
         try:
