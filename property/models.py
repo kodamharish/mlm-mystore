@@ -436,6 +436,3 @@ class UserProperty(models.Model):
 
     def __str__(self):
         return f"{self.user.first_name} - {self.property.property_title} ({self.status})"
-
-
-

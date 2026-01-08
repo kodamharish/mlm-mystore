@@ -24,9 +24,7 @@ urlpatterns = [
     path('',include('users.urls')),
     path('',include('property.urls')),
     path('',include('business.urls')),
-    #path('',include('transactions.urls')),
-    #path('',include('commissions.urls')),
-    #path('',include('subscription.urls')),
+    
 
 ]
 

@@ -217,7 +217,7 @@ class PropertyTypeByCategoryIDView(APIView):
 
 
 
-class PropertyListCreateView(APIView):
+class PropertyListCreateView_old(APIView):
 
     def get(self, request):
         try:
@@ -279,6 +279,98 @@ class PropertyListCreateView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
+
+class PropertyListCreateView(APIView):
+
+    def get(self, request):
+        try:
+            # ---------------------------------------
+            # 1️⃣ BASE QUERYSET
+            # ---------------------------------------
+            queryset = Property.objects.all()
+
+            # ---------------------------------------
+            # 2️⃣ ROLE-BASED FILTER (OPTIONAL)
+            # ---------------------------------------
+            role_name = request.GET.get('role')
+
+            if role_name:
+                try:
+                    role = Role.objects.get(role_name__iexact=role_name)
+                except Role.DoesNotExist:
+                    return Response(
+                        {"error": f"Role '{role_name}' not found"},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+                users_with_role = User.objects.filter(roles=role)
+                queryset = queryset.filter(user_id__in=users_with_role)
+
+            # ---------------------------------------
+            # 3️⃣ APPLY PROPERTY FILTER (Django Filters)
+            # ---------------------------------------
+            filterset = PropertyFilter(data=request.GET, queryset=queryset)
+            if not filterset.is_valid():
+                return Response(
+                    filterset.errors,
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            queryset = filterset.qs
+
+            # ---------------------------------------
+            # 4️⃣ APPLY ORDERING
+            # ---------------------------------------
+            ordering = request.GET.get('ordering')
+            allowed = [
+                'created_at', '-created_at',
+                'total_property_value', '-total_property_value'
+            ]
+            queryset = queryset.order_by(ordering if ordering in allowed else '-created_at')
+
+            # ---------------------------------------
+            # 5️⃣ OPTIMIZE QUERYSET
+            # ---------------------------------------
+            queryset = queryset.select_related(
+                'category', 'property_type'
+            ).prefetch_related(
+                'amenities'
+            )
+
+            # ---------------------------------------
+            # 6️⃣ PAGINATION
+            # ---------------------------------------
+            paginator = GlobalPagination()
+            paginated_queryset = paginator.paginate_queryset(queryset, request)
+
+            serializer = PropertySerializer(paginated_queryset, many=True)
+
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def post(self, request):
+        try:
+            serializer = PropertySerializer(
+                data=request.data,
+                context={'request': request}
+            )
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 

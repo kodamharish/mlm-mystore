@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 import os
-from .pagination import GlobalPagination
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -45,7 +45,7 @@ REST_FRAMEWORK = {
     'DATETIME_FORMAT': "%d-%m-%Y %H:%M:%S",
 }
 
-
+from .pagination import GlobalPagination
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'GlobalPagination',
     'DEFAULT_FILTER_BACKENDS': [

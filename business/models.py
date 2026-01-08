@@ -328,6 +328,9 @@ class ProductVariant(models.Model):
             free_ratio = self.offer.y_quantity / self.offer.x_quantity
             return float(self.mrp) - (float(self.mrp) * free_ratio)
 
+        if offer.offer_type == "free_gift":
+            return float(self.mrp)
+
         return float(self.mrp)
 
     def save(self, *args, **kwargs):

@@ -222,7 +222,7 @@ class RoleListCreateView(APIView):
 
     def get(self, request):
         try:
-            roles = Role.objects.all().order_by('-id')
+            roles = Role.objects.all().order_by('-role_id')
 
             paginator = GlobalPagination()
             paginated_roles = paginator.paginate_queryset(roles, request)
@@ -308,7 +308,7 @@ class UserListCreateView(APIView):
 
     def get(self, request):
         try:
-            users = User.objects.all().order_by('-id')
+            users = User.objects.all().order_by('-user_id')
 
             paginator = GlobalPagination()
             paginated_users = paginator.paginate_queryset(users, request)
@@ -908,7 +908,7 @@ class MeetingRequestListCreateView(APIView):
 
     def get(self, request):
         try:
-            requests = MeetingRequest.objects.all().order_by('-created_at')
+            requests = MeetingRequest.objects.all().order_by('-request_id')
 
             paginator = GlobalPagination()
             paginated_requests = paginator.paginate_queryset(
@@ -990,7 +990,7 @@ class ScheduledMeetingListCreateView(APIView):
 
     def get(self, request):
         try:
-            meetings = ScheduledMeeting.objects.all().order_by('-scheduled_date')
+            meetings = ScheduledMeeting.objects.all().order_by('-scheduled_meeting_id')
 
             paginator = GlobalPagination()
             paginated_meetings = paginator.paginate_queryset(
