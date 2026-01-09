@@ -55,6 +55,45 @@ class Category(models.Model):
 
 
 
+class Offer(models.Model):
+
+    OFFER_TYPES = (
+        ('discount_percent', 'Discount Percentage'),
+        ('discount_flat', 'Flat Discount'),
+        ('buy_x_get_y', 'Buy X Get Y'),
+        ('free_gift', 'Free Gift'),
+    )
+
+    offer_type = models.CharField(max_length=30, choices=OFFER_TYPES)
+    value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    x_quantity = models.PositiveIntegerField(null=True, blank=True)
+    y_quantity = models.PositiveIntegerField(null=True, blank=True)
+    description = models.CharField(max_length=255, blank=True, null=True)
+
+    # user = models.ForeignKey(
+    #     User,
+    #     on_delete=models.CASCADE,
+    #     related_name='offers'
+    # )
+
+    user = models.ForeignKey(
+        "users.User",     # ✅ STRING
+        on_delete=models.CASCADE,
+        related_name="offers"
+    )
+
+    start_date = models.DateField()
+    end_date = models.DateField()
+    is_active = models.BooleanField(default=True)
+
+    def save(self, *args, **kwargs):
+        today = timezone.now().date()
+        self.is_active = self.start_date <= today <= self.end_date
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.offer_type} - {self.description}"
+
 
 class Business(models.Model):
 
@@ -97,6 +136,12 @@ class Business(models.Model):
         Category,
         limit_choices_to={'level': 'business'},
         related_name='businesses',
+        blank=True
+    )
+    offer = models.ForeignKey(
+        "business.Offer",     # ✅ STRING
+        on_delete=models.SET_NULL,
+        null=True,
         blank=True
     )
 
@@ -181,44 +226,7 @@ class BusinessWorkingHour(models.Model):
     class Meta:
         unique_together = ('business', 'day')
 
-class Offer(models.Model):
 
-    OFFER_TYPES = (
-        ('discount_percent', 'Discount Percentage'),
-        ('discount_flat', 'Flat Discount'),
-        ('buy_x_get_y', 'Buy X Get Y'),
-        ('free_gift', 'Free Gift'),
-    )
-
-    offer_type = models.CharField(max_length=30, choices=OFFER_TYPES)
-    value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    x_quantity = models.PositiveIntegerField(null=True, blank=True)
-    y_quantity = models.PositiveIntegerField(null=True, blank=True)
-    description = models.CharField(max_length=255, blank=True, null=True)
-
-    # user = models.ForeignKey(
-    #     User,
-    #     on_delete=models.CASCADE,
-    #     related_name='offers'
-    # )
-
-    user = models.ForeignKey(
-        "users.User",     # ✅ STRING
-        on_delete=models.CASCADE,
-        related_name="offers"
-    )
-
-    start_date = models.DateField()
-    end_date = models.DateField()
-    is_active = models.BooleanField(default=True)
-
-    def save(self, *args, **kwargs):
-        today = timezone.now().date()
-        self.is_active = self.start_date <= today <= self.end_date
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.offer_type} - {self.description}"
 
 class Product(models.Model):
 
