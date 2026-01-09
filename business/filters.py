@@ -148,7 +148,29 @@ class BusinessFilter(django_filters.FilterSet):
     verification_status = django_filters.CharFilter(field_name='verification_status')
     is_active = django_filters.BooleanFilter(field_name='is_active')
 
+    #category = django_filters.NumberFilter(field_name='categories__id')
+
+    # Filter by category_id
     category = django_filters.NumberFilter(field_name='categories__id')
+
+    #Filter by category name exact match
+    # category_name = django_filters.CharFilter(
+    # field_name='categories__name',
+    # lookup_expr='iexact'
+    # )
+
+
+    # Filter by category name patial match
+    category_name = django_filters.CharFilter(
+        field_name='categories__name',
+        lookup_expr='icontains'
+    )
+
+    category_level = django_filters.CharFilter(
+    field_name='categories__level',
+    lookup_expr='iexact'
+    )
+
 
     city = django_filters.CharFilter(field_name='city', lookup_expr='iexact')
     state = django_filters.CharFilter(field_name='state', lookup_expr='iexact')
