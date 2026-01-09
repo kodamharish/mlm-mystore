@@ -3,6 +3,7 @@ from .models import *
 # Register your models here.
 admin.site.register(Category)
 admin.site.register(Business)
+admin.site.register(BusinessWorkingHour)
 admin.site.register(Offer)
 admin.site.register(Product)
 admin.site.register(ProductVariant)

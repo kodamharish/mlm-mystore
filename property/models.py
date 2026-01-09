@@ -249,6 +249,9 @@ class Property(models.Model):
         if self.listing_days:
             self.expiry_date = date.today() + timedelta(days=self.listing_days)
 
+        # 🔹 Directly copy user_id to added_by every time
+        self.added_by = self.user_id
+
         # Step 5: Save the object
         super().save(*args, **kwargs)
 

@@ -199,27 +199,6 @@ class CategoryBulkCreateView(APIView):
 
 
 # Business List & Create
-class BusinessListCreateView_old(APIView):
-    def get(self, request):
-        try:
-            businesses = Business.objects.all().order_by('-created_at')
-            serializer = BusinessSerializer(businesses, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def post(self, request):
-        try:
-            serializer = BusinessSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {"message": "Business created successfully", "data": serializer.data},
-                    status=status.HTTP_201_CREATED
-                )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class BusinessListCreateView(APIView):
@@ -259,33 +238,6 @@ class BusinessListCreateView(APIView):
 
 
 # Business Detail (GET, PUT, DELETE)
-class BusinessDetailView_old(APIView):
-    def get(self, request, business_id):
-        try:
-            business = get_object_or_404(Business, business_id=business_id)
-            serializer = BusinessSerializer(business)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def put(self, request, business_id):
-        try:
-            business = get_object_or_404(Business, business_id=business_id)
-            serializer = BusinessSerializer(business, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_200_OK)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def delete(self, request, business_id):
-        try:
-            business = get_object_or_404(Business, business_id=business_id)
-            business.delete()
-            return Response({"message": "Business deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class BusinessDetailView(APIView):
@@ -330,22 +282,6 @@ class BusinessDetailView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class BusinessByUserIDView_old(APIView):
-    def get(self, request, id):
-        try:
-            businesses = Business.objects.filter(user_id=id)
-
-            if not businesses.exists():
-                return Response(
-                    {"error": "No businesses found for this user"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
-            serializer = BusinessSerializer(businesses, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class BusinessByUserIDView(APIView):
@@ -383,24 +319,6 @@ class BusinessByUserIDView(APIView):
 
 
 # Offer List & Create
-class OfferListCreateView_old(APIView):
-    def get(self, request):
-        try:
-            offers = Offer.objects.all()
-            serializer = OfferSerializer(offers, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def post(self, request):
-        try:
-            serializer = OfferSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class OfferListCreateView(APIView):
 
@@ -482,25 +400,6 @@ class OfferDetailView(APIView):
 
 
 
-class OfferByUserView_old(APIView):
-    def get(self, request, user_id):
-        try:
-            offers = Offer.objects.filter(user_id=user_id)
-
-            if not offers.exists():
-                return Response(
-                    {"message": "No offers found for this user"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
-            serializer = OfferSerializer(offers, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
 
 
@@ -540,32 +439,6 @@ class OfferByUserView(APIView):
 # -------------------------------
 # Product List & Create API
 # -------------------------------
-class ProductListCreateView_old(APIView):
-    """
-    GET  → List all products
-    POST → Create a new product
-    """
-    def get(self, request):
-        try:
-            products = Product.objects.all().order_by('-created_at')
-            serializer = ProductSerializer(products, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def post(self, request):
-        try:
-            serializer = ProductSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {"message": "Product created successfully", "data": serializer.data},
-                    status=status.HTTP_201_CREATED
-                )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class ProductListCreateView(APIView):
     #permission_classes = [IsAuthenticated]
@@ -656,47 +529,6 @@ class ProductListCreateView(APIView):
 # -------------------------------
 # Product Detail (GET, PUT, DELETE)
 # -------------------------------
-class ProductDetailView_old(APIView):
-    """
-    GET    → Retrieve a single product
-    PUT    → Update product details
-    DELETE → Remove product
-    """
-    def get(self, request, product_id):
-        try:
-            product = get_object_or_404(Product, id=product_id)
-             # ✅ Increase view count
-            product.view_count = (product.view_count or 0) + 1
-            product.save(update_fields=['view_count'])
-            serializer = ProductSerializer(product)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def put(self, request, product_id):
-        try:
-            product = get_object_or_404(Product, id=product_id)
-            serializer = ProductSerializer(product, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {"message": "Product updated successfully", "data": serializer.data},
-                    status=status.HTTP_200_OK
-                )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def delete(self, request, product_id):
-        try:
-            product = get_object_or_404(Product, id=product_id)
-            product.delete()
-            return Response(
-                {"message": "Product deleted successfully."},
-                status=status.HTTP_204_NO_CONTENT
-            )
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ProductDetailView(APIView):
     #permission_classes = [IsAuthenticated]

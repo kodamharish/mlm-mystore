@@ -323,7 +323,9 @@ class Lead(models.Model):
 class CarouselItem(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    image = models.ImageField(upload_to='carousel/')
+    #image = models.ImageField(upload_to='carousel/')
+    image = models.ImageField(upload_to='carousel/', blank=True, null=True)
+    video = models.FileField(upload_to='carousel/', blank=True, null=True)
     link = models.URLField(blank=True)
     order = models.PositiveIntegerField(default=0)
     active = models.BooleanField(default=True)

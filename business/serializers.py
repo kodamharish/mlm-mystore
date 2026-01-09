@@ -5,7 +5,27 @@ from .models import *
 # ===========================
 # BUSINESS
 # ===========================
+# class BusinessSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Business
+#         fields = "__all__"
+#         read_only_fields = (
+#             'verification_status',
+#             'verified_at',
+#             'created_at',
+#             'updated_at'
+#         )
+
+
+class BusinessWorkingHourSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BusinessWorkingHour
+        fields = ['id', 'day', 'opens_at', 'closes_at', 'is_closed']
+
+
 class BusinessSerializer(serializers.ModelSerializer):
+    working_hours = BusinessWorkingHourSerializer(many=True, required=False)
+
     class Meta:
         model = Business
         fields = "__all__"
@@ -15,6 +35,32 @@ class BusinessSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         )
+
+    def create(self, validated_data):
+        working_hours_data = validated_data.pop('working_hours', [])
+        business = super().create(validated_data)
+
+        for wh in working_hours_data:
+            BusinessWorkingHour.objects.create(business=business, **wh)
+
+        return business
+
+
+    def update(self, instance, validated_data):
+        working_hours_data = validated_data.pop('working_hours', None)
+
+        business = super().update(instance, validated_data)
+
+        if working_hours_data is not None:
+            # Clear old working hours
+            instance.working_hours.all().delete()
+
+            # Recreate new ones
+            for wh in working_hours_data:
+                BusinessWorkingHour.objects.create(business=instance, **wh)
+
+        return business
+
 
 
 # ===========================

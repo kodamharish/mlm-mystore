@@ -52,6 +52,10 @@ class Category(models.Model):
         return f"{self.name} ({self.level})"
 
 
+
+
+
+
 class Business(models.Model):
 
     BUSINESS_TYPES = (
@@ -150,6 +154,32 @@ class Business(models.Model):
 
     def __str__(self):
         return self.business_name
+
+
+
+class BusinessWorkingHour(models.Model):
+    DAYS = [
+        ('monday', 'Monday'),
+        ('tuesday', 'Tuesday'),
+        ('wednesday', 'Wednesday'),
+        ('thursday', 'Thursday'),
+        ('friday', 'Friday'),
+        ('saturday', 'Saturday'),
+        ('sunday', 'Sunday'),
+    ]
+
+    business = models.ForeignKey(
+        Business,
+        related_name='working_hours',
+        on_delete=models.CASCADE
+    )
+    day = models.CharField(max_length=20, choices=DAYS)
+    opens_at = models.TimeField(null=True, blank=True)
+    closes_at = models.TimeField(null=True, blank=True)
+    is_closed = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ('business', 'day')
 
 class Offer(models.Model):
 
