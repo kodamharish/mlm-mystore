@@ -165,6 +165,11 @@ class BusinessFilter(django_filters.FilterSet):
         field_name='categories__name',
         lookup_expr='icontains'
     )
+    # Filter by category slug (strict)
+    category_slug = django_filters.CharFilter(
+        field_name='categories__slug',
+        lookup_expr='iexact'
+    )
 
     category_level = django_filters.CharFilter(
     field_name='categories__level',
