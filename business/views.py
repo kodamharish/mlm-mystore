@@ -653,16 +653,61 @@ class ProductDetailView(APIView):
     #         transaction.set_rollback(True)
     #         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    # @transaction.atomic
+    # def put(self, request, product_id):
+    #     try:
+    #         product = get_object_or_404(Product, product_id=product_id)
+
+    #         product_data = request.data.get('product')
+    #         variants = request.data.get('variants')
+    #         media_files = request.FILES.getlist('media')
+
+    #         # 🔄 Update PRODUCT only if provided
+    #         if product_data:
+    #             for field, value in product_data.items():
+    #                 setattr(product, field, value)
+
+    #             product.verification_status = 'pending'
+    #             product.save()
+
+    #         # 🔄 Update VARIANTS only if explicitly sent
+    #         if variants is not None:
+    #             ProductVariant.objects.filter(product=product).delete()
+
+    #             for v in variants:
+    #                 ProductVariant.objects.create(product=product, **v)
+
+    #         # ➕ Add MEDIA only if files are sent
+    #         if media_files:
+    #             for file in media_files:
+    #                 ProductMedia.objects.create(
+    #                     product=product,
+    #                     media_type='image',
+    #                     file=file
+    #                 )
+
+    #         return Response(
+    #             {"message": "Product updated successfully"},
+    #             status=status.HTTP_200_OK
+    #         )
+
+    #     except Exception as e:
+    #         transaction.set_rollback(True)
+    #         return Response(
+    #             {"error": str(e)},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
+
     @transaction.atomic
     def put(self, request, product_id):
         try:
             product = get_object_or_404(Product, product_id=product_id)
 
             product_data = request.data.get('product')
-            variants = request.data.get('variants')
+            variants_data = request.data.get('variants')
             media_files = request.FILES.getlist('media')
 
-            # 🔄 Update PRODUCT only if provided
+            # 🔹 Update Product fields if present
             if product_data:
                 for field, value in product_data.items():
                     setattr(product, field, value)
@@ -670,14 +715,30 @@ class ProductDetailView(APIView):
                 product.verification_status = 'pending'
                 product.save()
 
-            # 🔄 Update VARIANTS only if explicitly sent
-            if variants is not None:
-                ProductVariant.objects.filter(product=product).delete()
+            # 🔹 Update variants only (do not create / delete)
+            if variants_data is not None:
+                for v in variants_data:
+                    variant_id = v.get('id')
 
-                for v in variants:
-                    ProductVariant.objects.create(product=product, **v)
+                    if not variant_id:
+                        # Skip any variant without id
+                        continue
 
-            # ➕ Add MEDIA only if files are sent
+                    variant = ProductVariant.objects.filter(
+                        id=variant_id,
+                        product=product
+                    ).first()
+
+                    if not variant:
+                        continue
+
+                    for field, value in v.items():
+                        if field != 'id':
+                            setattr(variant, field, value)
+
+                    variant.save()
+
+            # 🔹 Media append only
             if media_files:
                 for file in media_files:
                     ProductMedia.objects.create(
@@ -686,17 +747,12 @@ class ProductDetailView(APIView):
                         file=file
                     )
 
-            return Response(
-                {"message": "Product updated successfully"},
-                status=status.HTTP_200_OK
-            )
+            return Response({"message": "Product updated successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
             transaction.set_rollback(True)
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
     def delete(self, request, product_id):
