@@ -302,7 +302,56 @@ class ProductFilter(django_filters.FilterSet):
 
     # Filter by product category slug
     #category_slug = django_filters.CharFilter(field_name='category__slug', lookup_expr='iexact')
+    #category_slug = django_filters.CharFilter(method='filter_category_slug')
+
+
     category_slug = django_filters.CharFilter(method='filter_category_slug')
+    category_id = django_filters.NumberFilter(method='filter_category_id')
+
+    def filter_category_slug(self, queryset, name, value):
+        try:
+            category = Category.objects.get(slug=value)
+        except Category.DoesNotExist:
+            return queryset.none()
+
+        return self._apply_category_filter(queryset, category)
+
+
+    def filter_category_id(self, queryset, name, value):
+        try:
+            category = Category.objects.get(pk=value)
+        except Category.DoesNotExist:
+            return queryset.none()
+
+        return self._apply_category_filter(queryset, category)
+
+
+    def _apply_category_filter(self, queryset, category):
+
+        # 🔹 GLOBAL LEVEL
+        if category.level == 'global':
+            business_ids = Category.objects.filter(parent=category).values_list('category_id', flat=True)
+            product_ids = Category.objects.filter(parent__in=business_ids).values_list('category_id', flat=True)
+
+            return queryset.filter(
+                Q(business__categories__category_id__in=list(business_ids)) |
+                Q(category_id__in=list(product_ids))
+            ).distinct()
+
+        # 🔹 BUSINESS LEVEL
+        if category.level == 'business':
+            product_ids = Category.objects.filter(parent=category).values_list('category_id', flat=True)
+
+            return queryset.filter(
+                Q(business__categories__category_id=category.category_id) |
+                Q(category_id__in=list(product_ids))
+            ).distinct()
+
+        # 🔹 PRODUCT LEVEL
+        if category.level == 'product':
+            return queryset.filter(category_id=category.category_id).distinct()
+
+        return queryset
 
 
     # Filter by business allowed category id
@@ -368,7 +417,7 @@ class ProductFilter(django_filters.FilterSet):
         return queryset
     
 
-    def filter_category_slug(self, queryset, name, value):
+    def filter_category_slug2(self, queryset, name, value):
         try:
             category = Category.objects.get(slug=value)
         except Category.DoesNotExist:
