@@ -129,6 +129,8 @@ class Business(models.Model):
     business_name = models.CharField(max_length=255, unique=True)
     legal_name = models.CharField(max_length=255, blank=True, null=True)
     business_type = models.CharField(max_length=30, choices=BUSINESS_TYPES)
+    #slug = models.SlugField(unique=True)
+    slug = models.SlugField(blank=True, null=True)
     description = models.TextField(blank=True, null=True)
 
     # Seller allowed categories
@@ -230,10 +232,11 @@ class BusinessWorkingHour(models.Model):
 
 class Product(models.Model):
 
+    
+
     VERIFICATION_STATUS = (
-        ('draft', 'Draft'),
         ('pending', 'Pending'),
-        ('approved', 'Approved'),
+        ('verified', 'Verified'),
         ('rejected', 'Rejected'),
         ('suspended', 'Suspended'),
     )
@@ -284,9 +287,15 @@ class Product(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # def clean(self):
+    #     if self.category and not self.business.categories.filter(id=self.category.id).exists():
+    #         raise ValidationError("Business is not allowed to sell in this category.")
+
     def clean(self):
-        if self.category and not self.business.categories.filter(id=self.category.id).exists():
+        category_id = getattr(self.category, 'pk', None)
+        if category_id and not self.business.categories.filter(pk=category_id).exists():
             raise ValidationError("Business is not allowed to sell in this category.")
+
 
     @property
     def is_visible(self):

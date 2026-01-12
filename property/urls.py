@@ -49,11 +49,11 @@ urlpatterns = [
     path('commission-summary/', CommissionSummaryAPIView.as_view(), name='commission-summary-all'),
     path('commission-summary/<int:user_id>/', CommissionSummaryAPIView.as_view(), name='commission-summary-user'),
 
-    path("properties/by-role/<str:role_name>/", PropertiesByRoleAPIView.as_view(),name='properties-by-role'),
+    #path("properties/by-role/<str:role_name>/", PropertiesByRoleAPIView.as_view(),name='properties-by-role'),
 
 
 
-    path('properties/search/', PropertySearchAPIView.as_view(),name='properties-search'),
+    #path('properties/search/', PropertySearchAPIView.as_view(),name='properties-search'),
 
 
     

@@ -466,6 +466,72 @@ class ProductListCreateView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    # def get(self, request):
+
+    #     business_param = request.GET.get('business')
+
+    #     # base_qs = Product.objects.filter(is_active=True, verification_status='verified')
+    #     base_qs = Product.objects.filter()
+
+    #     business_data = None
+    #     if business_param:
+    #         business = Business.objects.filter(slug=business_param).first()
+    #         if business:
+    #             base_qs = base_qs.filter(business=business)
+    #             business_data = {
+    #                 "id": business.business_id,
+    #                 "name": business.business_name,
+    #                 "slug": business.slug,
+    #                 "city": business.city,
+    #                 "state": business.state,
+    #                 "rating": float(business.rating),
+    #                 "status": "Open"
+    #             }
+
+    #     f = ProductFilter(request.GET, queryset=base_qs)
+    #     filtered_qs = f.qs
+
+    #     filters = f.get_facets(filtered_qs)
+
+    #     paginator = GlobalPagination()
+    #     page = paginator.paginate_queryset(filtered_qs, request)
+
+    #     products = []
+    #     for p in page:
+    #         products.append({
+    #             "product_id": p.product_id,
+    #             "product_name": p.product_name,
+    #             "brand": p.brand,
+    #             "min_price": float(p.min_price) if p.min_price else None,
+    #             "max_price": float(p.max_price) if p.max_price else None,
+    #             "discount": float(p.discount) if p.discount else None,
+    #             "rating": float(p.rating),
+    #             "category": p.category_id,
+    #             "attributes": p.attributes or {},
+    #             "business": p.business_id,
+    #             "media": [
+    #                 {
+    #                     "file": m.file.url,
+    #                     "media_type": m.media_type,
+    #                     "is_primary": m.is_primary
+    #                 }
+    #                 # for m in p.media.filter(is_primary=True)[:1]
+    #                 for m in p.media.filter()
+    #             ]
+    #         })
+
+    #     return Response({
+    #         "business": business_data,
+    #         "filters": filters,
+    #         "products": products,
+    #         "pagination": {
+    #             "page": paginator.page.number,
+    #             "page_size": paginator.page.paginator.per_page,
+    #             "total": paginator.page.paginator.count,
+    #             "total_pages": paginator.page.paginator.num_pages,
+    #         }
+    #     })
+
     @transaction.atomic
     def post(self, request):
         """
