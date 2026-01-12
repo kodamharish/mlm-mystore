@@ -326,7 +326,7 @@ class ProductFilter(django_filters.FilterSet):
         return self._apply_category_filter(queryset, category)
 
 
-    def _apply_category_filter(self, queryset, category):
+    def _apply_category_filter1(self, queryset, category):
 
         # 🔹 GLOBAL LEVEL
         if category.level == 'global':
@@ -348,6 +348,27 @@ class ProductFilter(django_filters.FilterSet):
             ).distinct()
 
         # 🔹 PRODUCT LEVEL
+        if category.level == 'product':
+            return queryset.filter(category_id=category.category_id).distinct()
+
+        return queryset
+    
+
+
+    def _apply_category_filter(self, queryset, category):
+
+        # GLOBAL
+        if category.level == 'global':
+            business_ids = Category.objects.filter(parent=category).values_list('category_id', flat=True)
+            product_ids = Category.objects.filter(parent__in=business_ids).values_list('category_id', flat=True)
+            return queryset.filter(category_id__in=list(product_ids)).distinct()
+
+        # BUSINESS
+        if category.level == 'business':
+            product_ids = Category.objects.filter(parent=category).values_list('category_id', flat=True)
+            return queryset.filter(category_id__in=list(product_ids)).distinct()
+
+        # PRODUCT
         if category.level == 'product':
             return queryset.filter(category_id=category.category_id).distinct()
 
