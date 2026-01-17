@@ -426,26 +426,56 @@ class OfferByUserView(APIView):
 
 class ProductListCreateView(APIView):
 
+    # def get(self, request):
+    #     try:
+    #         queryset = Product.objects.select_related(
+    #             'business', 'category'
+    #         ).prefetch_related(
+    #             'variants__media'
+    #         ).order_by('-created_at')
+    #         # ✅ django-filters (Product + Variant level)
+    #         queryset = ProductFilter(
+    #             request.GET,
+    #             queryset=queryset
+    #         ).qs
+
+    #         paginator = GlobalPagination()
+    #         paginated_qs = paginator.paginate_queryset(queryset, request)
+    #         serializer = ProductSerializer(paginated_qs, many=True)
+    #         return paginator.get_paginated_response(serializer.data)
+
+    #     except Exception as e:
+    #         return Response({"error": str(e)}, status=500)
+
     def get(self, request):
-        try:
-            queryset = Product.objects.select_related(
-                'business', 'category'
-            ).prefetch_related(
-                'variants__media'
-            ).order_by('-created_at')
-            # ✅ django-filters (Product + Variant level)
-            queryset = ProductFilter(
-                request.GET,
-                queryset=queryset
-            ).qs
+        queryset = Product.objects.select_related(
+            'business', 'category'
+        ).prefetch_related(
+            'variants__media'
+        ).order_by('-created_at')
 
-            paginator = GlobalPagination()
-            paginated_qs = paginator.paginate_queryset(queryset, request)
-            serializer = ProductSerializer(paginated_qs, many=True)
-            return paginator.get_paginated_response(serializer.data)
+        queryset = ProductFilter(request.GET, queryset=queryset).qs
 
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
+        variant_id = request.GET.get('variant_id')
+
+        if variant_id:
+            queryset = queryset.filter(variants__id=variant_id).distinct()
+
+            for product in queryset:
+                product._filtered_variants = product.variants.filter(id=variant_id)
+
+        paginator = GlobalPagination()
+        paginated_qs = paginator.paginate_queryset(queryset, request)
+
+        # inject filtered variants into serializer output
+        data = ProductSerializer(paginated_qs, many=True).data
+
+        if variant_id:
+            for item, product in zip(data, paginated_qs):
+                item["variants"] = ProductVariantSerializer(product._filtered_variants, many=True).data
+
+        return paginator.get_paginated_response(data)
+
 
     @transaction.atomic
     def post(self, request):
@@ -506,17 +536,38 @@ class ProductListCreateView(APIView):
 
 class ProductDetailView(APIView):
 
-    def get(self, request, product_id):
-        try:
-            product = get_object_or_404(
-                Product.objects.prefetch_related('variants__media'),
-                product_id=product_id
-            )
-            serializer = ProductSerializer(product)
-            return Response(serializer.data, status=200)
+    # def get(self, request, product_id):
+    #     try:
+    #         product = get_object_or_404(
+    #             Product.objects.prefetch_related('variants__media'),
+    #             product_id=product_id
+    #         )
+    #         serializer = ProductSerializer(product)
+    #         return Response(serializer.data, status=200)
 
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
+    #     except Exception as e:
+    #         return Response({"error": str(e)}, status=500)
+    def get(self, request, product_id):
+        product = get_object_or_404(
+            Product.objects.prefetch_related('variants__media'),
+            product_id=product_id
+        )
+
+        variant_id = request.GET.get('variant_id')
+
+        if variant_id:
+            if not product.variants.filter(id=variant_id).exists():
+                return Response({"error": "Variant not found for this product"}, status=404)
+
+            product._filtered_variants = product.variants.filter(id=variant_id)
+            data = ProductSerializer(product).data
+            data["variants"] = ProductVariantSerializer(product._filtered_variants, many=True).data
+            return Response(data, status=200)
+
+        return Response(ProductSerializer(product).data, status=200)
+
+   
+
 
     @transaction.atomic
     def put(self, request, product_id):
