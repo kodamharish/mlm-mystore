@@ -9,7 +9,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.conf import settings
-
+from decimal import Decimal
 
 
  
@@ -70,11 +70,6 @@ class Offer(models.Model):
     y_quantity = models.PositiveIntegerField(null=True, blank=True)
     description = models.CharField(max_length=255, blank=True, null=True)
 
-    # user = models.ForeignKey(
-    #     User,
-    #     on_delete=models.CASCADE,
-    #     related_name='offers'
-    # )
 
     user = models.ForeignKey(
         "users.User",     # ✅ STRING
@@ -114,11 +109,6 @@ class Business(models.Model):
 
     business_id = models.AutoField(primary_key=True)
 
-    # user = models.ForeignKey(
-    #     User,
-    #     on_delete=models.CASCADE,
-    #     related_name='businesses'
-    # )
 
     user = models.ForeignKey(
         "users.User",     # ✅ STRING
@@ -241,12 +231,6 @@ class Product(models.Model):
         ('suspended', 'Suspended'),
     )
 
-    # business = models.ForeignKey(
-    #     Business,
-    #     on_delete=models.CASCADE,
-    #     related_name='products'
-    # )
-
     business = models.ForeignKey(
         "business.Business",   # ✅ STRING
         on_delete=models.CASCADE,
@@ -273,7 +257,7 @@ class Product(models.Model):
     verification_status = models.CharField(
         max_length=20,
         choices=VERIFICATION_STATUS,
-        default='draft'
+        default='pending'
     )
     rejection_reason = models.TextField(blank=True, null=True)
     verified_at = models.DateTimeField(blank=True, null=True)
@@ -287,10 +271,7 @@ class Product(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # def clean(self):
-    #     if self.category and not self.business.categories.filter(id=self.category.id).exists():
-    #         raise ValidationError("Business is not allowed to sell in this category.")
-
+    
     def clean(self):
         category_id = getattr(self.category, 'pk', None)
         if category_id and not self.business.categories.filter(pk=category_id).exists():
@@ -299,7 +280,7 @@ class Product(models.Model):
 
     @property
     def is_visible(self):
-        return self.is_active and self.verification_status == 'approved'
+        return self.is_active and self.verification_status == 'verified'
 
     def __str__(self):
         return self.product_name
@@ -307,16 +288,22 @@ class Product(models.Model):
 
 class ProductVariant(models.Model):
 
-    # product = models.ForeignKey(
-    #     Product,
-    #     on_delete=models.CASCADE,
-    #     related_name='variants'
-    # )
+    VERIFICATION_STATUS = (
+        ('pending', 'Pending'),
+        ('verified', 'Verified'),
+        ('rejected', 'Rejected'),
+        ('suspended', 'Suspended'),
+    )
 
     product = models.ForeignKey(
         "business.Product",   # ✅ STRING
         on_delete=models.CASCADE,
         related_name="variants"
+    )
+    verification_status = models.CharField(
+        max_length=20,
+        choices=VERIFICATION_STATUS,
+        default='pending'
     )
 
     sku = models.CharField(max_length=100, unique=True)
@@ -346,12 +333,7 @@ class ProductVariant(models.Model):
     manufacture_date = models.DateField(blank=True, null=True)
     expiry_date = models.DateField(blank=True, null=True)
 
-    # offer = models.ForeignKey(
-    #     Offer,
-    #     on_delete=models.SET_NULL,
-    #     null=True,
-    #     blank=True
-    # )
+    
     offer = models.ForeignKey(
         "business.Offer",     # ✅ STRING
         on_delete=models.SET_NULL,
@@ -363,34 +345,48 @@ class ProductVariant(models.Model):
 
     def apply_offer(self):
         if not self.offer or not self.offer.is_active:
-            return float(self.mrp)
+            return self.mrp or Decimal('0')
+
+        price = self.mrp or Decimal('0')
 
         if self.offer.offer_type == "discount_percent" and self.offer.value:
-            return float(self.mrp) - (float(self.mrp) * float(self.offer.value) / 100)
+            return price - (price * Decimal(self.offer.value) / Decimal('100'))
 
         if self.offer.offer_type == "discount_flat" and self.offer.value:
-            return max(float(self.mrp) - float(self.offer.value), 0)
+            return max(price - Decimal(self.offer.value), Decimal('0'))
 
         if self.offer.offer_type == "buy_x_get_y" and self.offer.x_quantity and self.offer.y_quantity:
-            free_ratio = self.offer.y_quantity / self.offer.x_quantity
-            return float(self.mrp) - (float(self.mrp) * free_ratio)
+            free_ratio = Decimal(self.offer.y_quantity) / Decimal(self.offer.x_quantity)
+            return price - (price * free_ratio)
 
-        if offer.offer_type == "free_gift":
-            return float(self.mrp)
+        if self.offer.offer_type == "free_gift":
+            return price
 
-        return float(self.mrp)
+        return price
+
 
     def save(self, *args, **kwargs):
+        # normalize decimals
+        mrp = Decimal(str(self.mrp)) if self.mrp is not None else Decimal('0')
+        sp = Decimal(str(self.selling_price)) if self.selling_price is not None else None
+        price = sp or mrp
+
+        cgst = Decimal(str(self.cgst_percent)) if self.cgst_percent is not None else Decimal('0')
+        sgst = Decimal(str(self.sgst_percent)) if self.sgst_percent is not None else Decimal('0')
+
+        # apply offer before tax
         self.selling_price = self.apply_offer()
-        price = self.selling_price or self.mrp
 
-        self.cgst_amount = (price * self.cgst_percent) / 100
-        self.sgst_amount = (price * self.sgst_percent) / 100
+        # tax calculations
+        self.cgst_amount = (price * cgst / Decimal('100'))
+        self.sgst_amount = (price * sgst / Decimal('100'))
 
+        # auto deactivate if product not approved
         if self.product.verification_status != 'approved':
             self.is_active = False
 
         super().save(*args, **kwargs)
+
 
     def __str__(self):
         return f"{self.product.product_name} - {self.attributes}"
@@ -402,20 +398,6 @@ class ProductMedia(models.Model):
         ('image', 'Image'),
         ('video', 'Video'),
     )
-
-    # product = models.ForeignKey(
-    #     Product,
-    #     on_delete=models.CASCADE,
-    #     related_name='media'
-    # )
-
-    # variant = models.ForeignKey(
-    #     ProductVariant,
-    #     on_delete=models.SET_NULL,
-    #     null=True,
-    #     blank=True,
-    #     related_name='media'
-    # )
 
     product = models.ForeignKey(
         "business.Product",   # ✅ STRING

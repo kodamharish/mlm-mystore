@@ -34,7 +34,14 @@ class User(models.Model):
     MARITAL_STATUS = (
         ('single','Single'),
         ('married', 'Married'),
+        ('divorced', 'Divorced'),
+        ('widowed', 'Widowed'),
         
+    )
+    Gender = (
+        ('female','Female'),
+        ('male', 'Male'),
+        ('other', 'Other'),    
     )
     
 
@@ -53,7 +60,6 @@ class User(models.Model):
     email = models.EmailField(unique=True)
     phone_number = models.CharField(max_length=15, unique=True)
     date_of_birth = models.DateField(null=True, blank=True)
-    gender = models.CharField(max_length=20, null=True, blank=True)
     image = models.ImageField(upload_to=temp_directory_path, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     city = models.CharField(max_length=255, blank=True, null=True)
@@ -67,6 +73,7 @@ class User(models.Model):
         default='inactive'
     )
     marital_status = models.CharField(max_length=50,choices=MARITAL_STATUS,blank=True, null=True)
+    gender = models.CharField(max_length=20,choices=Gender,null=True, blank=True)
 
     pan_number = models.CharField(max_length=10, blank=True, null=True)
     aadhaar_number = models.CharField(max_length=12, blank=True, null=True)

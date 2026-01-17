@@ -5,17 +5,6 @@ from .models import *
 # ===========================
 # BUSINESS
 # ===========================
-# class BusinessSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Business
-#         fields = "__all__"
-#         read_only_fields = (
-#             'verification_status',
-#             'verified_at',
-#             'created_at',
-#             'updated_at'
-#         )
-
 
 class BusinessWorkingHourSerializer(serializers.ModelSerializer):
     class Meta:
@@ -66,28 +55,36 @@ class BusinessSerializer(serializers.ModelSerializer):
 # ===========================
 # PRODUCT MEDIA
 # ===========================
-class ProductMediaSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductMedia
-        fields = "__all__"
 
 
 # ===========================
 # PRODUCT VARIANT
 # ===========================
+
+# ===========================
+# PRODUCT (NESTED READ)
+# ===========================
+
+
+
+class ProductMediaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductMedia
+        #fields = ['id', 'media_type', 'file', 'is_primary', 'sort_order']
+        fields = "__all__"
+
+
 class ProductVariantSerializer(serializers.ModelSerializer):
+    media = ProductMediaSerializer(many=True, read_only=True)
+
     class Meta:
         model = ProductVariant
         fields = "__all__"
         read_only_fields = ('selling_price', 'cgst_amount', 'sgst_amount')
 
 
-# ===========================
-# PRODUCT (NESTED READ)
-# ===========================
 class ProductSerializer(serializers.ModelSerializer):
     variants = ProductVariantSerializer(many=True, read_only=True)
-    media = ProductMediaSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product

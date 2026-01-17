@@ -35,38 +35,19 @@ from .serializers import BusinessSerializer, ProductSerializer
 
 from .filters import BusinessFilter, ProductFilter
 
+import json
+from django.db import transaction
+from django.shortcuts import get_object_or_404
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.views import APIView
+
 
 
 
 class CategoryListCreateView(APIView):
 
-    # def get(self, request):
-    #     try:
-    #         categories = Category.objects.filter(is_active=True)
-
-    #         level = request.GET.get('level')
-    #         parent = request.GET.get('parent')
-
-    #         if level:
-    #             categories = categories.filter(level=level)
-
-    #         if parent:
-    #             categories = categories.filter(parent_id=parent)
-    #         else:
-    #             categories = categories.filter(parent__isnull=True)
-
-    #         # ✅ Manual pagination
-    #         paginator = GlobalPagination()
-    #         paginated_qs = paginator.paginate_queryset(categories, request)
-
-    #         serializer = CategorySerializer(paginated_qs, many=True)
-    #         return paginator.get_paginated_response(serializer.data)
-
-    #     except Exception as e:
-    #         return Response(
-    #             {'error': str(e)},
-    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
-    #         )
+    
 
     def get(self, request):
         try:
@@ -436,21 +417,22 @@ class OfferByUserView(APIView):
             )
 
 
+
 # -------------------------------
 # Product List & Create API
 # -------------------------------
 
+
+
 class ProductListCreateView(APIView):
-    #permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
             queryset = Product.objects.select_related(
                 'business', 'category'
             ).prefetch_related(
-                'variants', 'media'
+                'variants__media'
             ).order_by('-created_at')
-
             # ✅ django-filters (Product + Variant level)
             queryset = ProductFilter(
                 request.GET,
@@ -459,102 +441,29 @@ class ProductListCreateView(APIView):
 
             paginator = GlobalPagination()
             paginated_qs = paginator.paginate_queryset(queryset, request)
-
             serializer = ProductSerializer(paginated_qs, many=True)
             return paginator.get_paginated_response(serializer.data)
 
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    # def get(self, request):
-
-    #     business_param = request.GET.get('business')
-
-    #     # base_qs = Product.objects.filter(is_active=True, verification_status='verified')
-    #     base_qs = Product.objects.filter()
-
-    #     business_data = None
-    #     if business_param:
-    #         business = Business.objects.filter(slug=business_param).first()
-    #         if business:
-    #             base_qs = base_qs.filter(business=business)
-    #             business_data = {
-    #                 "id": business.business_id,
-    #                 "name": business.business_name,
-    #                 "slug": business.slug,
-    #                 "city": business.city,
-    #                 "state": business.state,
-    #                 "rating": float(business.rating),
-    #                 "status": "Open"
-    #             }
-
-    #     f = ProductFilter(request.GET, queryset=base_qs)
-    #     filtered_qs = f.qs
-
-    #     filters = f.get_facets(filtered_qs)
-
-    #     paginator = GlobalPagination()
-    #     page = paginator.paginate_queryset(filtered_qs, request)
-
-    #     products = []
-    #     for p in page:
-    #         products.append({
-    #             "product_id": p.product_id,
-    #             "product_name": p.product_name,
-    #             "brand": p.brand,
-    #             "min_price": float(p.min_price) if p.min_price else None,
-    #             "max_price": float(p.max_price) if p.max_price else None,
-    #             "discount": float(p.discount) if p.discount else None,
-    #             "rating": float(p.rating),
-    #             "category": p.category_id,
-    #             "attributes": p.attributes or {},
-    #             "business": p.business_id,
-    #             "media": [
-    #                 {
-    #                     "file": m.file.url,
-    #                     "media_type": m.media_type,
-    #                     "is_primary": m.is_primary
-    #                 }
-    #                 # for m in p.media.filter(is_primary=True)[:1]
-    #                 for m in p.media.filter()
-    #             ]
-    #         })
-
-    #     return Response({
-    #         "business": business_data,
-    #         "filters": filters,
-    #         "products": products,
-    #         "pagination": {
-    #             "page": paginator.page.number,
-    #             "page_size": paginator.page.paginator.per_page,
-    #             "total": paginator.page.paginator.count,
-    #             "total_pages": paginator.page.paginator.num_pages,
-    #         }
-    #     })
+            return Response({"error": str(e)}, status=500)
 
     @transaction.atomic
     def post(self, request):
-        """
-        Nested Create:
-        Product + Variants + Media
-        """
         try:
             product_data = request.data.get('product')
-            variants = request.data.get('variants', [])
-            media_files = request.FILES.getlist('media')
+            variants_data = request.data.get('variants', [])
+
+            # parse JSON if coming as string (from Postman)
+            if isinstance(product_data, str):
+                product_data = json.loads(product_data)
+            if isinstance(variants_data, str):
+                variants_data = json.loads(variants_data)
 
             if not product_data:
-                return Response(
-                    {"error": "Product data is required"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response({"error": "Product data is required"}, status=400)
 
-            business = get_object_or_404(
-                Business,
-                business_id=product_data.get('business')
-            )
+            business = get_object_or_404(Business, business_id=product_data.get('business'))
 
-            # ✅ Create Product
             product = Product.objects.create(
                 business=business,
                 product_name=product_data.get('product_name'),
@@ -565,31 +474,30 @@ class ProductListCreateView(APIView):
                 verification_status='pending'
             )
 
-            # ✅ Create Variants
-            for v in variants:
-                ProductVariant.objects.create(
+            # create variants + media
+            for v in variants_data:
+                variant = ProductVariant.objects.create(
                     product=product,
-                    **v
+                    **{k: v[k] for k in v if k not in ('id', 'media')}
                 )
 
-            # ✅ Create Media
-            for index, file in enumerate(media_files):
-                ProductMedia.objects.create(
-                    product=product,
-                    media_type='image',
-                    file=file,
-                    is_primary=index == 0,
-                    sort_order=index
-                )
+                media_list = v.get('media', [])
+                for m in media_list:
+                    uploaded = request.FILES.get('media_file')
+                    if uploaded:
+                        ProductMedia.objects.create(
+                            product=product,
+                            variant=variant,
+                            media_type=m.get('media_type', 'image'),
+                            file=uploaded
+                        )
 
-            return Response(
-                {"message": "Product created", "product_id": product.product_id},
-                status=status.HTTP_201_CREATED
-            )
+            return Response({"message": "Product created", "product_id": product.product_id}, status=201)
 
         except Exception as e:
             transaction.set_rollback(True)
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": str(e)}, status=500)
+
 
 
 # -------------------------------
@@ -597,106 +505,18 @@ class ProductListCreateView(APIView):
 # -------------------------------
 
 class ProductDetailView(APIView):
-    #permission_classes = [IsAuthenticated]
 
     def get(self, request, product_id):
         try:
             product = get_object_or_404(
-                Product.objects.prefetch_related('variants', 'media'),
+                Product.objects.prefetch_related('variants__media'),
                 product_id=product_id
             )
             serializer = ProductSerializer(product)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.data, status=200)
 
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    # @transaction.atomic
-    # def put(self, request, product_id):
-    #     """
-    #     Nested Update:
-    #     Product + Replace Variants + Add Media
-    #     """
-    #     try:
-    #         product = get_object_or_404(Product, product_id=product_id)
-
-    #         product_data = request.data.get('product', {})
-    #         variants = request.data.get('variants', [])
-    #         media_files = request.FILES.getlist('media')
-
-    #         # 🔄 Update product fields
-    #         for field, value in product_data.items():
-    #             setattr(product, field, value)
-
-    #         product.verification_status = 'pending'
-    #         product.save()
-
-    #         # 🔄 Replace variants
-    #         ProductVariant.objects.filter(product=product).delete()
-    #         for v in variants:
-    #             ProductVariant.objects.create(product=product, **v)
-
-    #         # ➕ Add media
-    #         for file in media_files:
-    #             ProductMedia.objects.create(
-    #                 product=product,
-    #                 media_type='image',
-    #                 file=file
-    #             )
-
-    #         return Response(
-    #             {"message": "Product updated"},
-    #             status=status.HTTP_200_OK
-    #         )
-
-    #     except Exception as e:
-    #         transaction.set_rollback(True)
-    #         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    # @transaction.atomic
-    # def put(self, request, product_id):
-    #     try:
-    #         product = get_object_or_404(Product, product_id=product_id)
-
-    #         product_data = request.data.get('product')
-    #         variants = request.data.get('variants')
-    #         media_files = request.FILES.getlist('media')
-
-    #         # 🔄 Update PRODUCT only if provided
-    #         if product_data:
-    #             for field, value in product_data.items():
-    #                 setattr(product, field, value)
-
-    #             product.verification_status = 'pending'
-    #             product.save()
-
-    #         # 🔄 Update VARIANTS only if explicitly sent
-    #         if variants is not None:
-    #             ProductVariant.objects.filter(product=product).delete()
-
-    #             for v in variants:
-    #                 ProductVariant.objects.create(product=product, **v)
-
-    #         # ➕ Add MEDIA only if files are sent
-    #         if media_files:
-    #             for file in media_files:
-    #                 ProductMedia.objects.create(
-    #                     product=product,
-    #                     media_type='image',
-    #                     file=file
-    #                 )
-
-    #         return Response(
-    #             {"message": "Product updated successfully"},
-    #             status=status.HTTP_200_OK
-    #         )
-
-    #     except Exception as e:
-    #         transaction.set_rollback(True)
-    #         return Response(
-    #             {"error": str(e)},
-    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
-    #         )
+            return Response({"error": str(e)}, status=500)
 
     @transaction.atomic
     def put(self, request, product_id):
@@ -704,67 +524,94 @@ class ProductDetailView(APIView):
             product = get_object_or_404(Product, product_id=product_id)
 
             product_data = request.data.get('product')
-            variants_data = request.data.get('variants')
-            media_files = request.FILES.getlist('media')
+            variants_data = request.data.get('variants', [])
 
-            # 🔹 Update Product fields if present
+            # parse JSON if sent as text
+            if isinstance(product_data, str):
+                product_data = json.loads(product_data)
+            if isinstance(variants_data, str):
+                variants_data = json.loads(variants_data)
+
+            # update product
             if product_data:
                 for field, value in product_data.items():
                     setattr(product, field, value)
-
-                product.verification_status = 'pending'
                 product.save()
 
-            # 🔹 Update variants only (do not create / delete)
-            if variants_data is not None:
-                for v in variants_data:
-                    variant_id = v.get('id')
+            # update variants + media
+            for v in variants_data:
+                variant_id = v.get('id')
+                media_list = v.get('media', [])
 
-                    if not variant_id:
-                        # Skip any variant without id
-                        continue
+                variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                if not variant:
+                    continue
 
-                    variant = ProductVariant.objects.filter(
-                        id=variant_id,
-                        product=product
-                    ).first()
+                for field, value in v.items():
+                    if field not in ('id', 'media'):
+                        setattr(variant, field, value)
+                variant.save()
 
-                    if not variant:
-                        continue
+                # update media inside variant
+                for m in media_list:
+                    media_id = m.get('id')
+                    uploaded = request.FILES.get('media_file')
 
-                    for field, value in v.items():
-                        if field != 'id':
-                            setattr(variant, field, value)
+                    if media_id:
+                        media_obj = ProductMedia.objects.filter(
+                            id=media_id, variant=variant, product=product
+                        ).first()
 
-                    variant.save()
+                        if media_obj:
+                            for field, value in m.items():
+                                if field not in ('id', 'file'):
+                                    setattr(media_obj, field, value)
+                            if uploaded:
+                                media_obj.file = uploaded
+                            media_obj.save()
 
-            # 🔹 Media append only
-            if media_files:
-                for file in media_files:
-                    ProductMedia.objects.create(
-                        product=product,
-                        media_type='image',
-                        file=file
-                    )
+                    else:
+                        # new media append
+                        if uploaded:
+                            ProductMedia.objects.create(
+                                product=product,
+                                variant=variant,
+                                media_type=m.get('media_type', 'image'),
+                                file=uploaded,
+                                sort_order=m.get('sort_order', 0)
+                            )
 
-            return Response({"message": "Product updated successfully"}, status=status.HTTP_200_OK)
+            return Response({"message": "Product updated successfully"}, status=200)
 
         except Exception as e:
             transaction.set_rollback(True)
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
+            return Response({"error": str(e)}, status=500)
 
     def delete(self, request, product_id):
         try:
+            variant_param = request.query_params.get('variants')
+            media_param = request.query_params.get('media')
+
+            if media_param:
+                ids = [int(i) for i in media_param.split(',') if i.isdigit()]
+                deleted, _ = ProductMedia.objects.filter(
+                    product_id=product_id, id__in=ids
+                ).delete()
+                return Response({"message": f"{deleted} media deleted"}, status=200)
+
+            if variant_param:
+                ids = [int(i) for i in variant_param.split(',') if i.isdigit()]
+                deleted, _ = ProductVariant.objects.filter(
+                    product_id=product_id, id__in=ids
+                ).delete()
+                return Response({"message": f"{deleted} variants deleted"}, status=200)
+
+            # delete full product
             get_object_or_404(Product, product_id=product_id).delete()
-            return Response(
-                {"message": "Product deleted"},
-                status=status.HTTP_204_NO_CONTENT
-            )
+            return Response({"message": "Product deleted"}, status=204)
 
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": str(e)}, status=500)
 
 
 
@@ -790,27 +637,6 @@ class ProductByBusinessView(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
