@@ -89,6 +89,7 @@ class ProductFilter(django_filters.FilterSet):
 
     category_slug = django_filters.CharFilter(method='filter_category_slug')
     category_id = django_filters.NumberFilter(method='filter_category_id')
+    variant_id = django_filters.NumberFilter(method='filter_variant_id')
 
     def filter_category_slug(self, queryset, name, value):
         try:
@@ -169,6 +170,16 @@ class ProductFilter(django_filters.FilterSet):
         fields = []
 
     # ---------- Custom Methods ----------
+    def filter_variant_id(self, queryset, name, value):
+        qs = queryset.filter(variants__id=value).distinct()
+
+        # If no matching product for variant → return zero results
+        if not qs.exists():
+            return queryset.none()
+
+        return qs
+
+
     
 
     def filter_variant_status(self, queryset, name, value):
