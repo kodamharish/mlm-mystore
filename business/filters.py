@@ -5,6 +5,56 @@ from .models import *
 
 
 
+import django_filters
+from django.db.models import Q
+from .models import Category
+
+class CategoryFilter(django_filters.FilterSet):
+
+    search = django_filters.CharFilter(method='filter_search')
+    level = django_filters.CharFilter(field_name='level', lookup_expr='iexact')
+    parent = django_filters.NumberFilter(field_name='parent_id')
+    slug = django_filters.CharFilter(field_name='slug')
+    is_active = django_filters.BooleanFilter(field_name='is_active')
+    user_id = django_filters.NumberFilter(method='filter_user_categories')
+
+    class Meta:
+        model = Category
+        fields = []
+
+    # OLD: search
+    def filter_search(self, queryset, name, value):
+        return queryset.filter(
+            Q(name__icontains=value) |
+            Q(slug__icontains=value)
+        )
+
+    # NEW: category filtering by user
+    def filter_user_categories(self, queryset, name, value):
+        level = self.data.get('level', None)
+
+        # User → Business → Business Categories (level=business)
+        business_categories = Category.objects.filter(
+            businesses__user_id=value,
+            level='business'
+        ).distinct()
+
+        # User → Business → Product Categories (children)
+        product_categories = Category.objects.filter(
+            parent__in=business_categories,
+            level='product'
+        ).distinct()
+
+        if level == 'business':
+            return business_categories
+        elif level == 'product':
+            return product_categories
+
+        # if no level → return both
+        return (business_categories | product_categories).distinct()
+
+
+
 class BusinessFilter(django_filters.FilterSet):
 
     search = django_filters.CharFilter(method='filter_search')
