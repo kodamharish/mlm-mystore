@@ -110,7 +110,7 @@ class CategoryListCreateView_old(APIView):
             )
 
 
-class CategoryListCreateView(APIView):
+class CategoryListCreateView_new1(APIView):
 
     def get(self, request):
         try:
@@ -147,6 +147,48 @@ class CategoryListCreateView(APIView):
         except Exception as e:
             return Response(
                 {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+class CategoryListCreateView(APIView):
+
+    def get(self, request):
+        try:
+            queryset = Category.objects.all().order_by('-category_id')
+
+            # Apply filter
+            category_filter = CategoryFilter(request.GET, queryset=queryset)
+            queryset = category_filter.qs
+
+            # Pagination
+            paginator = GlobalPagination()
+            page = paginator.paginate_queryset(queryset, request)
+
+            serializer = CategorySerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def post(self, request):
+        try:
+            serializer = CategorySerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {"message": "Category created successfully", "data": serializer.data},
+                    status=status.HTTP_201_CREATED
+                )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

@@ -9,7 +9,7 @@ import django_filters
 from django.db.models import Q
 from .models import Category
 
-class CategoryFilter(django_filters.FilterSet):
+class CategoryFilter_old(django_filters.FilterSet):
 
     search = django_filters.CharFilter(method='filter_search')
     level = django_filters.CharFilter(field_name='level', lookup_expr='iexact')
@@ -52,6 +52,68 @@ class CategoryFilter(django_filters.FilterSet):
 
         # if no level → return both
         return (business_categories | product_categories).distinct()
+
+
+
+class CategoryFilter(django_filters.FilterSet):
+    search = django_filters.CharFilter(method='filter_search')
+    level = django_filters.CharFilter(field_name='level', lookup_expr='iexact')
+    parent = django_filters.NumberFilter(field_name='parent_id')
+    slug = django_filters.CharFilter(field_name='slug')
+    is_active = django_filters.BooleanFilter(field_name='is_active')
+
+    user_id = django_filters.NumberFilter(method='filter_user_business_tree')
+    business_id = django_filters.NumberFilter(method='filter_dummy')   # <-- key fix
+
+    class Meta:
+        model = Category
+        fields = []
+
+    #
+    # prevent django-filter from auto-applying category.business_id
+    #
+    def filter_dummy(self, queryset, name, value):
+        return queryset   # do nothing here!
+
+    def filter_search(self, queryset, name, value):
+        return queryset.filter(
+            Q(name__icontains=value) | Q(slug__icontains=value)
+        )
+
+    def filter_user_business_tree(self, queryset, name, user_id):
+        level = self.data.get('level')
+        business_id = self.data.get('business_id')
+
+        # validate business belongs to user
+        if business_id:
+            if not Business.objects.filter(business_id=business_id, user_id=user_id).exists():
+                return queryset.none()
+
+        # 1. get business-level categories allowed for the user
+        business_categories = Category.objects.filter(
+            level='business',
+            businesses__user_id=user_id
+        ).distinct()
+
+        if business_id:
+            business_categories = business_categories.filter(
+                businesses__business_id=business_id
+            ).distinct()
+
+        if level == 'business':
+            return business_categories
+
+        # 2. get product-level categories under those business categories
+        product_categories = Category.objects.filter(
+            level='product',
+            parent__in=business_categories
+        ).distinct()
+
+        if level == 'product':
+            return product_categories
+
+        return (business_categories | product_categories).distinct()
+
 
 
 
