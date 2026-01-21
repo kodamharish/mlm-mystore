@@ -70,7 +70,7 @@ INSTALLED_APPS = [
     'property',
     #'transactions',
     #'commissions',
-    #'subscription',
+    'subscription',
     'business',
     
 ]

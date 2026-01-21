@@ -131,7 +131,9 @@ class BusinessFilter(django_filters.FilterSet):
     #category = django_filters.NumberFilter(field_name='categories__id')
 
     # Filter by category_id
-    category = django_filters.NumberFilter(field_name='categories__id')
+    #category = django_filters.NumberFilter(field_name='categories__id')
+    category = django_filters.NumberFilter(field_name='categories')
+
 
     #Filter by category name exact match
     # category_name = django_filters.CharFilter(
@@ -202,6 +204,13 @@ class ProductFilter(django_filters.FilterSet):
     category_slug = django_filters.CharFilter(method='filter_category_slug')
     category_id = django_filters.NumberFilter(method='filter_category_id')
     variant_id = django_filters.NumberFilter(method='filter_variant_id')
+    user_id = django_filters.NumberFilter(method='filter_user_products')
+    
+    def filter_user_products(self, queryset, name, value):
+        qs = queryset.filter(business__user_id=value).distinct()
+        return qs if qs.exists() else queryset.none()
+
+
 
     def filter_category_slug(self, queryset, name, value):
         try:
@@ -268,6 +277,10 @@ class ProductFilter(django_filters.FilterSet):
     has_offer = django_filters.BooleanFilter(method='filter_offer')
 
     attributes = django_filters.CharFilter(method='filter_attributes')
+    discount_range = django_filters.CharFilter(method='filter_discount_range')
+    price_range = django_filters.CharFilter(method='filter_price_range')
+
+
 
     ordering = django_filters.OrderingFilter(
         fields=(
@@ -290,6 +303,64 @@ class ProductFilter(django_filters.FilterSet):
             return queryset.none()
 
         return qs
+
+    from django.db.models import F, ExpressionWrapper, DecimalField
+
+    def filter_discount_range(self, queryset, name, value):
+        ranges = {
+            "0-9": (0, 9),
+            "10-19": (10, 19),
+            "20-29": (20, 29),
+            "30-39": (30, 39),
+            "40-49": (40, 49),
+            "50-59": (50, 59),
+            "60+": (60, None),
+        }
+
+        if value not in ranges:
+            return queryset.none()
+
+        low, high = ranges[value]
+
+        qs = queryset.annotate(
+            discount=ExpressionWrapper(
+                ((F('variants__mrp') - F('variants__selling_price')) / F('variants__mrp')) * 100,
+                output_field=DecimalField(max_digits=5, decimal_places=2)
+            )
+        )
+
+        if high is None:
+            qs = qs.filter(discount__gte=low)
+        else:
+            qs = qs.filter(discount__gte=low, discount__lte=high)
+
+        return qs.distinct() if qs.exists() else queryset.none()
+        
+    def filter_price_range(self, queryset, name, value):
+        ranges = {
+            "0-499": (0, 499),
+            "500-999": (500, 999),
+            "1000-4999": (1000, 4999),
+            "5000-9999": (5000, 9999),
+            "10000+": (10000, None),
+        }
+
+        if value not in ranges:
+            return queryset.none()
+
+        low, high = ranges[value]
+
+        if high is None:
+            qs = queryset.filter(variants__selling_price__gte=low)
+        else:
+            qs = queryset.filter(
+                variants__selling_price__gte=low,
+                variants__selling_price__lte=high
+            )
+
+        return qs.distinct() if qs.exists() else queryset.none()
+
+
 
 
     

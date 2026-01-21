@@ -13,10 +13,10 @@ urlpatterns = [
     path('users/<int:user_id>/', UserDetailView.as_view(), name='user-detail'),
     path('users/search/', UserSearchAPIView.as_view(), name='users-search'),
 
-    path('users/role/<str:role_name>/', UsersByRoleAPIView.as_view(), name='users-by-role'), 
-    path('users/status/<str:user_status>/', UsersByStatus.as_view(), name='users-by-status'), 
+    #path('users/role/<str:role_name>/', UsersByRoleAPIView.as_view(), name='users-by-role'), 
+    #path('users/status/<str:user_status>/', UsersByStatus.as_view(), name='users-by-status'), 
 
-    path('agents/referral-id/<str:referral_id>/', AgentsByReferralIdAPIView.as_view(), name='agents-by-referral-id'), 
+    #path('agents/referral-id/<str:referral_id>/', AgentsByReferralIdAPIView.as_view(), name='agents-by-referral-id'), 
     path('counts/', CountAPIView.as_view(), name='counts'),
 
     path('send-otp/', SendOTPView.as_view(), name='send-otp'),   
