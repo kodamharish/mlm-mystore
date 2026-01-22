@@ -38,7 +38,7 @@ class SubscriptionPlanListCreateView(APIView):
 
     def get(self, request):
         try:
-            plans = SubscriptionPlan.objects.all().order_by('-id')
+            plans = SubscriptionPlan.objects.all().order_by('-plan_id')
 
             paginator = GlobalPagination()
             paginated_plans = paginator.paginate_queryset(
