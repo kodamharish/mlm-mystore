@@ -63,7 +63,7 @@ class LoginAPIView_old(APIView):
 
 #Login With Email or Phonenumber
 
-class LoginAPIView(APIView):
+class LoginAPIView_new1(APIView):
     def post(self, request):
         email_or_phone = request.data.get("email_or_phonenumber")
         password = request.data.get("password")
@@ -106,6 +106,55 @@ class LoginAPIView(APIView):
 
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+
+
+class LoginAPIView(APIView):
+    def post(self, request):
+        identifier = request.data.get("email_or_phonenumber")   # same field name
+        password = request.data.get("password")
+
+        if not identifier or not password:
+            return Response(
+                {"error": "Identifier and password are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Detect login mode
+            if "@" in identifier:
+                user = User.objects.get(email=identifier)                     # Email login
+            elif identifier.isdigit() and len(identifier) <= 15:
+                user = User.objects.get(phone_number=identifier)             # Phone login
+            else:
+                user = User.objects.get(referral_id=identifier)              # Referral ID login
+
+            # Validate password
+            if check_password(password, user.password):
+                roles = user.roles.values_list('role_name', flat=True)
+
+                return Response(
+                    {
+                        "message": "Login successful",
+                        "user_id": user.user_id,
+                        "referral_id": user.referral_id,
+                        "referred_by": user.referred_by,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "email": user.email,
+                        "phone_number": user.phone_number,
+                        "roles": list(roles),
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            return Response({"error": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
+
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
 
 # Login With OTP
 class LoginAPIView1(APIView):

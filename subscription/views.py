@@ -7,7 +7,8 @@ from django.shortcuts import get_object_or_404
 from .models import *
 from .serializers import *
 from users.models import *  # Import your custom user model if needed
-from transactions.models import *
+#from transactions.models import *
+from mlm.pagination import GlobalPagination
 
 # ------------------ Subscription Plan ------------------
 
@@ -323,7 +324,7 @@ from django.db.models import Count
 from .models import Subscription
 from .serializers import SubscriptionSerializer
 from .filters import SubscriptionFilter
-from common.pagination import GlobalPagination
+#from common.pagination import GlobalPagination
 
 class SubscriptionSearchAPIView(APIView):
     pagination_class = GlobalPagination
