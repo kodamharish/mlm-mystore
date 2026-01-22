@@ -14,6 +14,24 @@ from mlm.pagination import GlobalPagination
 
 
 # List and Create Subscription Plans (e.g., Connect, Connect+, Relax)
+class SubscriptionPlanListCreateView_old(APIView):
+    def get(self, request):
+        try:
+            plans = SubscriptionPlan.objects.all()
+            serializer = SubscriptionPlanSerializer(plans, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        try:
+            serializer = SubscriptionPlanSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class SubscriptionPlanListCreateView(APIView):
@@ -97,6 +115,24 @@ class SubscriptionPlanDetailView(APIView):
 
 # ------------------ Subscription Plan Variant ------------------
 # List and Create Plan Variants (e.g., Connect+ 45 days, Connect+ 90 days)
+class SubscriptionPlanVariantListCreateView_old(APIView):
+    def get(self, request):
+        try:
+            variants = SubscriptionPlanVariant.objects.select_related("plan_id").all()
+            serializer = SubscriptionPlanVariantSerializer(variants, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        try:
+            serializer = SubscriptionPlanVariantSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
@@ -231,7 +267,7 @@ class SubscriptionDetailView(APIView):
 
 
 
-class UserSubscriptionsView_old(APIView):
+class UserSubscriptionsView(APIView):
     def get(self, request, user_id):
         try:
             subscriptions = Subscription.objects.filter(user_id=user_id).order_by('-subscription_id')
@@ -255,55 +291,9 @@ class UserSubscriptionsView_old(APIView):
 
 
 
-class UserSubscriptionsView(APIView):
-    """
-    GET → List user subscriptions (paginated) + latest_status
-    """
-
-    def get(self, request, user_id):
-        try:
-            subscriptions_qs = (
-                Subscription.objects
-                .filter(user_id=user_id)
-                .order_by('-subscription_id')
-            )
-
-            # 🔹 Latest status (from most recent subscription)
-            latest_status = (
-                subscriptions_qs.first().subscription_status
-                if subscriptions_qs.exists()
-                else None
-            )
-
-            paginator = GlobalPagination()
-            paginated_subscriptions = paginator.paginate_queryset(
-                subscriptions_qs,
-                request
-            )
-
-            serializer = SubscriptionSerializer(
-                paginated_subscriptions,
-                many=True
-            )
-
-            # Standard paginated response
-            response = paginator.get_paginated_response(serializer.data)
-
-            # 🔹 Add latest_status at top-level (BEST PRACTICE)
-            response.data['latest_status'] = latest_status
-
-            return response
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
 
 # Get Subscription Plans based on user_type
-class SubscriptionPlanByUserTypeView_old(APIView):
+class SubscriptionPlanByUserTypeView(APIView):
     def get(self, request, user_type):
         try:
             plans = SubscriptionPlan.objects.filter(user_type=user_type)
@@ -313,42 +303,8 @@ class SubscriptionPlanByUserTypeView_old(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class SubscriptionPlanByUserTypeView(APIView):
-    """
-    GET → List subscription plans by user_type (paginated)
-    """
-
-    def get(self, request, user_type):
-        try:
-            plans = (
-                SubscriptionPlan.objects
-                .filter(user_type=user_type)
-                .order_by('-plan_id')
-            )
-
-            paginator = GlobalPagination()
-            paginated_plans = paginator.paginate_queryset(
-                plans,
-                request
-            )
-
-            serializer = SubscriptionPlanSerializer(
-                paginated_plans,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-
 # Get Subscription Plan Variants based on user_type
-class SubscriptionPlanVariantByUserTypeView_old(APIView):
+class SubscriptionPlanVariantByUserTypeView(APIView):
     def get(self, request, user_type):
         try:
             variants = SubscriptionPlanVariant.objects.select_related("plan_id").filter(plan_id__user_type=user_type)
@@ -356,41 +312,6 @@ class SubscriptionPlanVariantByUserTypeView_old(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-class SubscriptionPlanVariantByUserTypeView(APIView):
-    """
-    GET → List subscription plan variants by user_type (paginated)
-    """
-
-    def get(self, request, user_type):
-        try:
-            variants = (
-                SubscriptionPlanVariant.objects
-                .select_related("plan_id")
-                .filter(plan__user_type=user_type)
-                .order_by('-variant_id')
-            )
-
-            paginator = GlobalPagination()
-            paginated_variants = paginator.paginate_queryset(
-                variants,
-                request
-            )
-
-            serializer = SubscriptionPlanVariantSerializer(
-                paginated_variants,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
 
 # subscriptions/views.py
