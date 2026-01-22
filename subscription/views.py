@@ -369,7 +369,7 @@ class SubscriptionPlanVariantByUserTypeView(APIView):
             variants = (
                 SubscriptionPlanVariant.objects
                 .select_related("plan_id")
-                .filter(plan__user_type=user_type)
+                .filter(plan_id__user_type=user_type)
                 .order_by('-variant_id')
             )
 
@@ -391,6 +391,7 @@ class SubscriptionPlanVariantByUserTypeView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
 
 
 # subscriptions/views.py
