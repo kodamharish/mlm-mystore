@@ -2175,7 +2175,7 @@ class SiteVisitsByUserView(APIView):
 
 
 
-class ReferralPrefixListCreateView(APIView):
+class ReferralPrefixListCreateView_old(APIView):
     def get(self, request):
         prefixes = ReferralPrefix.objects.all().order_by('-created_at')
         serializer = ReferralPrefixSerializer(prefixes, many=True)
@@ -2187,6 +2187,58 @@ class ReferralPrefixListCreateView(APIView):
             serializer.save()
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
+
+
+class ReferralPrefixListCreateView(APIView):
+
+    def get(self, request):
+        try:
+            prefixes = (
+                ReferralPrefix.objects
+                .all()
+                .order_by('-created_at')
+            )
+
+            paginator = GlobalPagination()
+            paginated_prefixes = paginator.paginate_queryset(
+                prefixes,
+                request
+            )
+
+            serializer = ReferralPrefixSerializer(
+                paginated_prefixes,
+                many=True
+            )
+
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def post(self, request):
+        try:
+            serializer = ReferralPrefixSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    serializer.data,
+                    status=status.HTTP_201_CREATED
+                )
+
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 
 class ReferralPrefixDetailView(APIView):

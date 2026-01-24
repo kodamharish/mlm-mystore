@@ -83,13 +83,146 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         read_only_fields = ('selling_price', 'cgst_amount', 'sgst_amount')
 
 
-class ProductSerializer(serializers.ModelSerializer):
+class ProductSerializer_old(serializers.ModelSerializer):
     variants = ProductVariantSerializer(many=True, read_only=True)
     
 
     class Meta:
         model = Product
         fields = "__all__"
+
+
+
+
+
+class ProductSerializer_new1(serializers.ModelSerializer):
+    variants = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = "__all__"
+
+    def get_variants(self, obj):
+        request = self.context.get("request")
+        qs = obj.variants.all()
+
+        price_range = request.query_params.get("price_range")
+        discount_range = request.query_params.get("discount_range")
+
+        # ----- PRICE FILTER -----
+        if price_range:
+            ranges = {
+                "0-499": (0, 499),
+                "500-999": (500, 999),
+                "1000-4999": (1000, 4999),
+                "5000-9999": (5000, 9999),
+                "10000+": (10000, None),
+            }
+
+            if price_range in ranges:
+                low, high = ranges[price_range]
+                if high is None:
+                    qs = qs.filter(selling_price__gte=low)
+                else:
+                    qs = qs.filter(selling_price__gte=low, selling_price__lte=high)
+
+        # ----- DISCOUNT FILTER -----
+        if discount_range:
+            ranges = {
+                "0-9": (0, 9),
+                "10-19": (10, 19),
+                "20-29": (20, 29),
+                "30-39": (30, 39),
+                "40-49": (40, 49),
+                "50-59": (50, 59),
+                "60+": (60, None),
+            }
+
+            if discount_range in ranges:
+                low, high = ranges[discount_range]
+
+                qs = qs.annotate(
+                    discount=ExpressionWrapper(
+                        ((F('mrp') - F('selling_price')) / F('mrp')) * 100,
+                        output_field=DecimalField(max_digits=5, decimal_places=2)
+                    )
+                )
+
+                if high is None:
+                    qs = qs.filter(discount__gte=low)
+                else:
+                    qs = qs.filter(discount__gte=low, discount__lte=high)
+
+        return ProductVariantSerializer(qs, many=True).data
+
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    variants = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = "__all__"
+
+    def get_variants(self, obj):
+        request = self.context.get("request")
+        qs = obj.variants.all()
+
+        # If serializer used without request context → return all variants
+        if request is None:
+            return ProductVariantSerializer(qs, many=True).data
+
+        params = request.query_params
+        price_range = params.get("price_range")
+        discount_range = params.get("discount_range")
+
+        # ----- PRICE RANGE -----
+        if price_range:
+            ranges = {
+                "0-499": (0, 499),
+                "500-999": (500, 999),
+                "1000-4999": (1000, 4999),
+                "5000-9999": (5000, 9999),
+                "10000+": (10000, None),
+            }
+
+            if price_range in ranges:
+                low, high = ranges[price_range]
+                if high is None:
+                    qs = qs.filter(selling_price__gte=low)
+                else:
+                    qs = qs.filter(selling_price__gte=low, selling_price__lte=high)
+
+        # ----- DISCOUNT RANGE -----
+        if discount_range:
+            ranges = {
+                "0-9": (0, 9),
+                "10-19": (10, 19),
+                "20-29": (20, 29),
+                "30-39": (30, 39),
+                "40-49": (40, 49),
+                "50-59": (50, 59),
+                "60+": (60, None),
+            }
+
+            if discount_range in ranges:
+                low, high = ranges[discount_range]
+
+                qs = qs.annotate(
+                    discount=ExpressionWrapper(
+                        ((F('mrp') - F('selling_price')) / F('mrp')) * 100,
+                        output_field=DecimalField(max_digits=5, decimal_places=2)
+                    )
+                )
+
+                if high is None:
+                    qs = qs.filter(discount__gte=low)
+                else:
+                    qs = qs.filter(discount__gte=low, discount__lte=high)
+
+        return ProductVariantSerializer(qs, many=True).data
+
+
 
 
 

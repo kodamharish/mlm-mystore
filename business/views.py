@@ -507,7 +507,7 @@ class OfferByUserView(APIView):
 
 
 
-class ProductListCreateView(APIView):
+class ProductListCreateView_old(APIView):
 
     # def get(self, request):
     #     try:
@@ -611,6 +611,127 @@ class ProductListCreateView(APIView):
             transaction.set_rollback(True)
             return Response({"error": str(e)}, status=500)
 
+
+
+class ProductListCreateView(APIView):
+
+    # def get(self, request):
+    #     queryset = Product.objects.select_related(
+    #         'business', 'category'
+    #     ).prefetch_related(
+    #         'variants__media'
+    #     ).order_by('-created_at')
+
+    #     queryset = ProductFilter(request.GET, queryset=queryset).qs
+
+    #     variant_id = request.GET.get('variant_id')
+
+    #     if variant_id:
+    #         queryset = queryset.filter(variants__id=variant_id).distinct()
+
+    #         for product in queryset:
+    #             product._filtered_variants = product.variants.filter(id=variant_id)
+
+    #     paginator = GlobalPagination()
+    #     paginated_qs = paginator.paginate_queryset(queryset, request)
+
+    #     # inject filtered variants into serializer output
+    #     data = ProductSerializer(paginated_qs, many=True).data
+
+    #     if variant_id:
+    #         for item, product in zip(data, paginated_qs):
+    #             item["variants"] = ProductVariantSerializer(product._filtered_variants, many=True).data
+
+    #     return paginator.get_paginated_response(data)
+
+    
+    def get(self, request):
+        queryset = Product.objects.select_related(
+            'business', 'category'
+        ).prefetch_related(
+            'variants__media'
+        ).order_by('-created_at')
+
+        queryset = ProductFilter(request.GET, queryset=queryset).qs
+
+        variant_id = request.GET.get('variant_id')
+
+        if variant_id:
+            queryset = queryset.filter(variants__id=variant_id).distinct()
+            for product in queryset:
+                product._filtered_variants = product.variants.filter(id=variant_id)
+
+        paginator = GlobalPagination()
+        paginated_qs = paginator.paginate_queryset(queryset, request)
+
+        data = ProductSerializer(
+            paginated_qs,
+            many=True,
+            context={"request": request}
+        ).data
+
+        if variant_id:
+            for item, product in zip(data, paginated_qs):
+                item["variants"] = ProductVariantSerializer(
+                    product._filtered_variants,
+                    many=True,
+                    context={"request": request}
+                ).data
+
+        return paginator.get_paginated_response(data)
+
+
+
+    @transaction.atomic
+    def post(self, request):
+        try:
+            product_data = request.data.get('product')
+            variants_data = request.data.get('variants', [])
+
+            # parse JSON if coming as string (from Postman)
+            if isinstance(product_data, str):
+                product_data = json.loads(product_data)
+            if isinstance(variants_data, str):
+                variants_data = json.loads(variants_data)
+
+            if not product_data:
+                return Response({"error": "Product data is required"}, status=400)
+
+            business = get_object_or_404(Business, business_id=product_data.get('business'))
+
+            product = Product.objects.create(
+                business=business,
+                product_name=product_data.get('product_name'),
+                description=product_data.get('description'),
+                brand=product_data.get('brand'),
+                category_id=product_data.get('category'),
+                attributes=product_data.get('attributes'),
+                verification_status='pending'
+            )
+
+            # create variants + media
+            for v in variants_data:
+                variant = ProductVariant.objects.create(
+                    product=product,
+                    **{k: v[k] for k in v if k not in ('id', 'media')}
+                )
+
+                media_list = v.get('media', [])
+                for m in media_list:
+                    uploaded = request.FILES.get('media_file')
+                    if uploaded:
+                        ProductMedia.objects.create(
+                            product=product,
+                            variant=variant,
+                            media_type=m.get('media_type', 'image'),
+                            file=uploaded
+                        )
+
+            return Response({"message": "Product created", "product_id": product.product_id}, status=201)
+
+        except Exception as e:
+            transaction.set_rollback(True)
+            return Response({"error": str(e)}, status=500)
 
 
 # -------------------------------
