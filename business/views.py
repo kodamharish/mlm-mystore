@@ -738,7 +738,7 @@ class ProductListCreateView(APIView):
 # Product Detail (GET, PUT, DELETE)
 # -------------------------------
 
-class ProductDetailView(APIView):
+class ProductDetailView_old(APIView):
 
     # def get(self, request, product_id):
     #     try:
@@ -868,6 +868,160 @@ class ProductDetailView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
+
+
+
+
+
+from users.models import *
+
+
+
+class ProductDetailView(APIView):
+
+    def get(self, request, product_id):
+        product = get_object_or_404(
+            Product.objects.prefetch_related('variants__media'),
+            product_id=product_id
+        )
+
+        variant_id = request.GET.get('variant_id')
+
+        if variant_id:
+            if not product.variants.filter(id=variant_id).exists():
+                return Response({"error": "Variant not found for this product"}, status=404)
+
+            product._filtered_variants = product.variants.filter(id=variant_id)
+            data = ProductSerializer(product).data
+            data["variants"] = ProductVariantSerializer(product._filtered_variants, many=True).data
+            return Response(data, status=200)
+
+        return Response(ProductSerializer(product).data, status=200)
+
+    @transaction.atomic
+    def put(self, request, product_id):
+        try:
+            product = get_object_or_404(Product, product_id=product_id)
+
+            product_data = request.data.get('product')
+            variants_data = request.data.get('variants', [])
+
+            # parse JSON if sent as text
+            if isinstance(product_data, str):
+                product_data = json.loads(product_data)
+            if isinstance(variants_data, str):
+                variants_data = json.loads(variants_data)
+
+            # update product
+            if product_data:
+                for field, value in product_data.items():
+                    setattr(product, field, value)
+                product.save()
+
+            # update variants + media
+            for v in variants_data:
+                variant_id = v.get('id')
+                media_list = v.get('media', [])
+
+                variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                if not variant:
+                    continue
+
+                # ✅ store old variant status
+                old_variant_status = variant.verification_status
+
+                for field, value in v.items():
+                    if field not in ('id', 'media'):
+                        setattr(variant, field, value)
+                variant.save()
+
+                # ✅ Trigger notification if variant status changed to VERIFIED
+                if old_variant_status != "verified" and variant.verification_status == "verified":
+                    self.create_variant_approval_notification(variant)
+
+                # update media inside variant
+                for m in media_list:
+                    media_id = m.get('id')
+                    uploaded = request.FILES.get('media_file')
+
+                    if media_id:
+                        media_obj = ProductMedia.objects.filter(
+                            id=media_id, variant=variant, product=product
+                        ).first()
+
+                        if media_obj:
+                            for field, value in m.items():
+                                if field not in ('id', 'file'):
+                                    setattr(media_obj, field, value)
+                            if uploaded:
+                                media_obj.file = uploaded
+                            media_obj.save()
+
+                    else:
+                        # new media append
+                        if uploaded:
+                            ProductMedia.objects.create(
+                                product=product,
+                                variant=variant,
+                                media_type=m.get('media_type', 'image'),
+                                file=uploaded,
+                                sort_order=m.get('sort_order', 0)
+                            )
+
+            return Response({"message": "Product updated successfully"}, status=200)
+
+        except Exception as e:
+            transaction.set_rollback(True)
+            return Response({"error": str(e)}, status=500)
+
+    def delete(self, request, product_id):
+        try:
+            variant_param = request.query_params.get('variants')
+            media_param = request.query_params.get('media')
+
+            if media_param:
+                ids = [int(i) for i in media_param.split(',') if i.isdigit()]
+                deleted, _ = ProductMedia.objects.filter(
+                    product_id=product_id, id__in=ids
+                ).delete()
+                return Response({"message": f"{deleted} media deleted"}, status=200)
+
+            if variant_param:
+                ids = [int(i) for i in variant_param.split(',') if i.isdigit()]
+                deleted, _ = ProductVariant.objects.filter(
+                    product_id=product_id, id__in=ids
+                ).delete()
+                return Response({"message": f"{deleted} variants deleted"}, status=200)
+
+            # delete full product
+            get_object_or_404(Product, product_id=product_id).delete()
+            return Response({"message": "Product deleted"}, status=204)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    # 🔥 NEW: Variant Verification Notification
+    def create_variant_approval_notification(self, variant):
+        added_by = variant.product.business.user  # product owner
+
+        # Notify all users except creator
+        users_to_notify = User.objects.exclude(user_id=added_by.user_id)
+
+        notification = Notification.objects.create(
+            message=f"Variant Verified: {variant.product.product_name} (SKU: {variant.sku})",
+            product_variant=variant
+        )
+
+        notification.visible_to_users.set(users_to_notify)
+
+        UserNotificationStatus.objects.bulk_create([
+            UserNotificationStatus(
+                user=user,
+                notification=notification,
+                is_read=False
+            )
+            for user in users_to_notify
+        ])
 
 
 # ------------------------------------

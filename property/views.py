@@ -361,7 +361,7 @@ class GlobalNotificationListView(APIView):
 
 
 
-class MarkNotificationReadView(APIView):
+class MarkNotificationReadView_old(APIView):
     def post(self, request):
         user_id = request.data.get('user_id')
         notification_id = request.data.get('notification_id')
@@ -386,6 +386,290 @@ class MarkNotificationReadView(APIView):
         except UserNotificationStatus.DoesNotExist:
             return Response({'error': 'Notification not found for user'}, status=status.HTTP_404_NOT_FOUND)
 
+
+class NotificationListView_new1(APIView):
+    """
+    GET → List notifications for a specific user
+    """
+
+    def get(self, request):
+        try:
+            user_id = request.query_params.get("user")
+
+            if not user_id:
+                return Response(
+                    {"error": "user parameter is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            user = User.objects.get(user_id=user_id)
+
+            is_read_filter = request.query_params.get("is_read")
+
+            statuses_qs = UserNotificationStatus.objects.filter(user=user)
+
+            # 🔥 FILTER SUPPORT
+            if is_read_filter is not None:
+                if is_read_filter.lower() == "true":
+                    statuses_qs = statuses_qs.filter(is_read=True)
+                elif is_read_filter.lower() == "false":
+                    statuses_qs = statuses_qs.filter(is_read=False)
+
+            statuses_qs = statuses_qs.select_related(
+                "notification",
+                "notification__property"
+            ).order_by("-notification__created_at")
+
+            paginator = GlobalPagination()
+            paginated_statuses = paginator.paginate_queryset(
+                statuses_qs,
+                request
+            )
+
+            data = [
+                {
+                    "notification_status_id": s.id,
+                    "notification_id": s.notification.id,
+                    "message": s.notification.message,
+                    "property": {
+                        "id": s.notification.property.property_id,
+                        "title": s.notification.property.property_title
+                    },
+                    "created_at": s.notification.created_at,
+                    "is_read": s.is_read
+                }
+                for s in paginated_statuses
+            ]
+
+            unread_count = UserNotificationStatus.objects.filter(
+                user=user,
+                is_read=False
+            ).count()
+
+            response = paginator.get_paginated_response(data)
+            response.data["unread_count"] = unread_count
+
+            return response
+
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+
+
+class NotificationListView_new2(APIView):
+    """
+    GET → List notifications
+    Optional filters:
+        ?user=<id>
+        ?is_read=true/false
+    """
+
+    def get(self, request):
+        try:
+            user_id = request.query_params.get("user")
+            is_read_filter = request.query_params.get("is_read")
+
+            statuses_qs = UserNotificationStatus.objects.all()
+
+            # ✅ Filter by user (optional)
+            if user_id:
+                try:
+                    user = User.objects.get(user_id=user_id)
+                    statuses_qs = statuses_qs.filter(user=user)
+                except User.DoesNotExist:
+                    return Response(
+                        {"error": "User not found"},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+            # ✅ Filter by read/unread
+            if is_read_filter is not None:
+                if is_read_filter.lower() == "true":
+                    statuses_qs = statuses_qs.filter(is_read=True)
+                elif is_read_filter.lower() == "false":
+                    statuses_qs = statuses_qs.filter(is_read=False)
+
+            statuses_qs = statuses_qs.select_related(
+                "notification",
+                "notification__property"
+            ).order_by("-notification__created_at")
+
+            paginator = GlobalPagination()
+            paginated_statuses = paginator.paginate_queryset(
+                statuses_qs,
+                request
+            )
+
+            data = [
+                {
+                    "notification_status_id": s.id,
+                    "notification_id": s.notification.id,
+                    "message": s.notification.message,
+                    "property": {
+                        "id": s.notification.property.property_id,
+                        "title": s.notification.property.property_title
+                    },
+                    "created_at": s.notification.created_at,
+                    "is_read": s.is_read
+                }
+                for s in paginated_statuses
+            ]
+
+            # ✅ Unread count (only if user filter applied)
+            unread_count = None
+            read_count = None
+            if user_id:
+                unread_count = UserNotificationStatus.objects.filter(
+                    user_id=user_id,
+                    is_read=False
+                ).count()
+                read_count = UserNotificationStatus.objects.filter(
+                    user_id=user_id,
+                    is_read=True
+                ).count()
+
+            response = paginator.get_paginated_response(data)
+
+            if unread_count is not None:
+                response.data["unread_count"] = unread_count
+                response.data["unread_count"] = unread_count
+
+            return response
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+
+
+class NotificationListView(APIView):
+    """
+    GET → List notifications
+    Optional filters:
+        ?user=<id>
+        ?is_read=true/false
+    """
+
+    def get(self, request):
+        try:
+            user_id = request.query_params.get("user")
+            is_read_filter = request.query_params.get("is_read")
+
+            statuses_qs = UserNotificationStatus.objects.all()
+
+            # ✅ Filter by user (optional)
+            if user_id:
+                try:
+                    user = User.objects.get(user_id=user_id)
+                    statuses_qs = statuses_qs.filter(user=user)
+                except User.DoesNotExist:
+                    return Response(
+                        {"error": "User not found"},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+            # ✅ Filter by read/unread
+            if is_read_filter is not None:
+                if is_read_filter.lower() == "true":
+                    statuses_qs = statuses_qs.filter(is_read=True)
+                elif is_read_filter.lower() == "false":
+                    statuses_qs = statuses_qs.filter(is_read=False)
+
+            statuses_qs = statuses_qs.select_related(
+                "notification",
+                "notification__property"
+            ).order_by("-notification__created_at")
+
+            paginator = GlobalPagination()
+            paginated_statuses = paginator.paginate_queryset(
+                statuses_qs,
+                request
+            )
+
+            data = [
+                {
+                    "notification_status_id": s.id,
+                    "notification_id": s.notification.id,
+                    "message": s.notification.message,
+                    "property": {
+                        "id": s.notification.property.property_id,
+                        "title": s.notification.property.property_title
+                    },
+                    "created_at": s.notification.created_at,
+                    "is_read": s.is_read
+                }
+                for s in paginated_statuses
+            ]
+
+            # ✅ Read / Unread Counts (only when user filter applied)
+            read_count = None
+            unread_count = None
+
+            if user_id:
+                read_count = UserNotificationStatus.objects.filter(
+                    user_id=user_id,
+                    is_read=True
+                ).count()
+
+                unread_count = UserNotificationStatus.objects.filter(
+                    user_id=user_id,
+                    is_read=False
+                ).count()
+
+            response = paginator.get_paginated_response(data)
+
+            if user_id:
+                response.data["read_count"] = read_count
+                response.data["unread_count"] = unread_count
+
+            return response
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+
+
+class MarkNotificationReadView(APIView):
+
+    def post(self, request):
+        user_id = request.data.get("user_id")
+        status_ids = request.data.get("notification_status_ids")
+
+        if not user_id or not status_ids:
+            return Response(
+                {"error": "user_id and notification_status_ids required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        UserNotificationStatus.objects.filter(
+            user_id=user_id,
+            id__in=status_ids
+        ).update(is_read=True)
+
+        return Response(
+            {"message": "Notifications marked as read"},
+            status=status.HTTP_200_OK
+        )
 
 
 

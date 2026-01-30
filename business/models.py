@@ -329,8 +329,9 @@ class ProductVariant(models.Model):
     length_cm = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     width_cm = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     height_cm = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
-    company_commission = models.DecimalField(max_digits=15,decimal_places=2,blank=True,null=True,default=0.00)
+    product_commission = models.DecimalField(max_digits=15,decimal_places=2,blank=True,null=True,default=0.00)
     distribution_commission = models.DecimalField(max_digits=15, decimal_places=2,blank=True,null=True,default=0.00)
+    #remaining_product_commission = models.DecimalField(max_digits=12, decimal_places=2,blank=True,null=True,default=0.00)
 
     manufacture_date = models.DateField(blank=True, null=True)
     expiry_date = models.DateField(blank=True, null=True)

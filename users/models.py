@@ -619,7 +619,7 @@ class Wishlist(models.Model):
     def __str__(self):
         if self.variant:
             return f"{self.user} - {self.variant.sku}"
-        return f"{self.user} - Property: {self.property_item.title}"
+        return f"{self.user} - Property: {self.property_item.property_title}"
 
 class Cart(models.Model):
     user = models.ForeignKey(

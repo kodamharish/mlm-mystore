@@ -371,24 +371,64 @@ class UserEMI(models.Model):
         return f"{self.user} - {self.emi_option.period_months}M EMI for {self.property}"
 
 
+# class Notification(models.Model):
+#     message = models.CharField(max_length=255)
+#     #property = models.ForeignKey('Property', on_delete=models.CASCADE, related_name='notifications')
+#     property = models.ForeignKey(
+#         "property.Property",
+#         on_delete=models.CASCADE,
+#         related_name="notifications"
+#     )
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     #is_read = models.BooleanField(default=False)
+#     #visible_to_users = models.ManyToManyField(User, related_name='notifications_visible_to')
+#     visible_to_users = models.ManyToManyField(
+#         "users.User",   # ✅ STRING
+#         related_name="notifications_visible_to"
+#     )
+
+#     def __str__(self):
+#         return f"{self.message} - {self.property.property_title}"
+
+
+
+
+
+from business.models import *
+
+
 class Notification(models.Model):
     message = models.CharField(max_length=255)
-    #property = models.ForeignKey('Property', on_delete=models.CASCADE, related_name='notifications')
+
     property = models.ForeignKey(
         "property.Property",
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="notifications"
     )
+
+    product_variant = models.ForeignKey(
+        "business.ProductVariant",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="notifications"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
-    #is_read = models.BooleanField(default=False)
-    #visible_to_users = models.ManyToManyField(User, related_name='notifications_visible_to')
+
     visible_to_users = models.ManyToManyField(
-        "users.User",   # ✅ STRING
+        "users.User",
         related_name="notifications_visible_to"
     )
 
     def __str__(self):
-        return f"{self.message} - {self.property.property_title}"
+        if self.property:
+            return f"{self.message} - {self.property.property_title}"
+        elif self.product_variant:
+            return f"{self.message} - {self.product_variant.product.product_name}"
+        return self.message
 
 
 

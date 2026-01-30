@@ -45,6 +45,8 @@ urlpatterns = [
 
     path('notifications/user-id/<int:user_id>/', GlobalNotificationListView.as_view(), name='global-notification'),
     path('notifications/mark-as-read/', MarkNotificationReadView.as_view(), name='mark-notification-read'),
+    path('notifications/', NotificationListView.as_view(), name='notifications-list'),
+    path('notifications/mark-read/', MarkNotificationReadView.as_view(), name='mark-notification-read'),
 
     path('commission-summary/', CommissionSummaryAPIView.as_view(), name='commission-summary-all'),
     path('commission-summary/<int:user_id>/', CommissionSummaryAPIView.as_view(), name='commission-summary-user'),
