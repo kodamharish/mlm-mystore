@@ -68,10 +68,10 @@ INSTALLED_APPS = [
     'corsheaders',
     'users',
     'property',
-    #'transactions',
     'commissions',
     'subscription',
     'business',
+    'transactions',
     
 ]
 

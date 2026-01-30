@@ -376,57 +376,6 @@ class Phonenumber(models.Model):
     
 
 
-
-
-
-
-
-
-
-#from property.models import *   
-
-class Like(models.Model):
-    # user = models.ForeignKey(User, on_delete=models.CASCADE)
-    # property = models.ForeignKey(Property, on_delete=models.CASCADE)
-
-    user = models.ForeignKey(
-        "users.User",          # ✅ STRING
-        on_delete=models.CASCADE
-    )
-    property = models.ForeignKey(
-        "property.Property",   # ✅ STRING
-        on_delete=models.CASCADE
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self):
-        return f"{self.id}"
-
-class Wishlist(models.Model):
-    # user = models.ForeignKey(User, on_delete=models.CASCADE)
-    # property = models.ForeignKey(Property, on_delete=models.CASCADE,blank=True, null=True)
-    # product = models.ForeignKey(Product, on_delete=models.CASCADE,blank=True, null=True)
-
-    user = models.ForeignKey(
-        "users.User",          # ✅ STRING
-        on_delete=models.CASCADE
-    )
-    property = models.ForeignKey(
-        "property.Property",   # ✅ STRING
-        on_delete=models.CASCADE,
-        blank=True,
-        null=True
-    )
-    product = models.ForeignKey(
-        "business.Product",    # ✅ STRING
-        on_delete=models.CASCADE,
-        blank=True,
-        null=True
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self):
-        return f"{self.id}"
-
-
 class ChatKeyword(models.Model):
     keyword = models.CharField(max_length=100, unique=True)
 
@@ -500,67 +449,144 @@ class ReferralPrefix(models.Model):
     def __str__(self):
         return self.prefix
 
+   
+
+class Like(models.Model):
+    
+    user = models.ForeignKey(
+        "users.User",          # ✅ STRING
+        on_delete=models.CASCADE
+    )
+    property = models.ForeignKey(
+        "property.Property",   # ✅ STRING
+        on_delete=models.CASCADE
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    def __str__(self):
+        return f"{self.id}"
 
 
 
 
-
-
-
-
-
-
-
-
+# class Wishlist_old(models.Model):
+    
+#     user = models.ForeignKey(
+#         "users.User",          # ✅ STRING
+#         on_delete=models.CASCADE
+#     )
+#     property = models.ForeignKey(
+#         "property.Property",   # ✅ STRING
+#         on_delete=models.CASCADE,
+#         blank=True,
+#         null=True
+#     )
+#     product = models.ForeignKey(
+#         "business.Product",    # ✅ STRING
+#         on_delete=models.CASCADE,
+#         blank=True,
+#         null=True
+#     )
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     def __str__(self):
+#         return f"{self.id}"
 
 
 
 
 from django.core.exceptions import ValidationError
 
-class Cart(models.Model):
-    # user = models.ForeignKey(
-    #     User,
-    #     on_delete=models.CASCADE,
-    #     related_name='user_cart'
-    # )
+# class Cart_old(models.Model):
+    
+#     user = models.ForeignKey(
+#         "users.User",          # ✅ STRING
+#         on_delete=models.CASCADE,
+#         related_name="user_cart"
+#     )
 
-    # product = models.ForeignKey(
-    #     Product,
-    #     on_delete=models.CASCADE,
-    #     null=True,
-    #     blank=True
-    # )
+#     product = models.ForeignKey(
+#         "business.Product",    # ✅ STRING
+#         on_delete=models.CASCADE,
+#         null=True,
+#         blank=True
+#     )
 
-    # property_item = models.ForeignKey(   # ✅ RENAMED
-    #     Property,
-    #     on_delete=models.CASCADE,
-    #     null=True,
-    #     blank=True
-    # )
+#     property_item = models.ForeignKey(
+#         "property.Property",   # ✅ STRING
+#         on_delete=models.CASCADE,
+#         null=True,
+#         blank=True
+#     )
+
+#     quantity = models.PositiveIntegerField(
+#         default=1,
+#         help_text="Applicable only for product"
+#     )
+
+#     created_at = models.DateTimeField(auto_now_add=True)
+
+#     class Meta:
+#         constraints = [
+#             models.UniqueConstraint(
+#                 fields=['user', 'product'],
+#                 name='unique_product_cart'
+#             )
+#         ]
+
+#     def clean(self):
+#         if not self.product and not self.property_item:
+#             raise ValidationError("Cart item must have either product or property.")
+
+#         if self.product and self.property_item:
+#             raise ValidationError("Cart item cannot have both product and property.")
+
+#         if self.property_item and self.quantity != 1:
+#             raise ValidationError("Property quantity must be 1.")
+
+#         if self.product and self.quantity < 1:
+#             raise ValidationError("Product quantity must be at least 1.")
+
+#     def get_item_price(self):
+#         if self.product:
+#             return self.product.selling_price
+#         if self.property_item:
+#             return self.property_item.price
+#         return 0
+
+#     @property
+#     def subtotal(self):   # ✅ NOW WORKS
+#         return self.get_item_price() * self.quantity
+
+#     def __str__(self):
+#         if self.product:
+#             return f"{self.user} - {self.product.product_name} x {self.quantity}"
+#         return f"{self.user} - Property: {self.property_item.title}"
+
+
+
+
+
+
+class Wishlist(models.Model):
     user = models.ForeignKey(
-        "users.User",          # ✅ STRING
+        "users.User",
         on_delete=models.CASCADE,
-        related_name="user_cart"
+        related_name="wishlist_items"
     )
 
-    product = models.ForeignKey(
-        "business.Product",    # ✅ STRING
+    variant = models.ForeignKey(
+        "business.ProductVariant",
         on_delete=models.CASCADE,
+        related_name="wishlisted_variants",
         null=True,
         blank=True
     )
 
     property_item = models.ForeignKey(
-        "property.Property",   # ✅ STRING
+        "property.Property",
         on_delete=models.CASCADE,
+        related_name="wishlisted_properties",
         null=True,
         blank=True
-    )
-
-    quantity = models.PositiveIntegerField(
-        default=1,
-        help_text="Applicable only for product"
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -568,36 +594,100 @@ class Cart(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['user', 'product'],
-                name='unique_product_cart'
-            )
+                fields=['user', 'variant'],
+                name='unique_variant_wishlist',
+                condition=models.Q(property_item__isnull=True)
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'property_item'],
+                name='unique_property_wishlist',
+                condition=models.Q(variant__isnull=True)
+            ),
         ]
 
     def clean(self):
-        if not self.product and not self.property_item:
-            raise ValidationError("Cart item must have either product or property.")
+        if not self.variant and not self.property_item:
+            raise ValidationError("Wishlist must have either variant or property item.")
 
-        if self.product and self.property_item:
-            raise ValidationError("Cart item cannot have both product and property.")
+        if self.variant and self.property_item:
+            raise ValidationError("Wishlist cannot have both variant and property.")
+
+    @property
+    def product(self):
+        return self.variant.product if self.variant else None
+
+    def __str__(self):
+        if self.variant:
+            return f"{self.user} - {self.variant.sku}"
+        return f"{self.user} - Property: {self.property_item.title}"
+
+class Cart(models.Model):
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="cart_items"
+    )
+
+    variant = models.ForeignKey(
+        "business.ProductVariant",
+        on_delete=models.CASCADE,
+        related_name="cart_variants",
+        null=True,
+        blank=True
+    )
+
+    property_item = models.ForeignKey(
+        "property.Property",
+        on_delete=models.CASCADE,
+        related_name="cart_properties",
+        null=True,
+        blank=True
+    )
+
+    quantity = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'variant'],
+                name='unique_variant_cart',
+                condition=models.Q(property_item__isnull=True)
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'property_item'],
+                name='unique_property_cart',
+                condition=models.Q(variant__isnull=True)
+            ),
+        ]
+
+    def clean(self):
+        if not self.variant and not self.property_item:
+            raise ValidationError("Cart must have either variant or property.")
+
+        if self.variant and self.property_item:
+            raise ValidationError("Cart cannot have both variant and property.")
 
         if self.property_item and self.quantity != 1:
             raise ValidationError("Property quantity must be 1.")
 
-        if self.product and self.quantity < 1:
-            raise ValidationError("Product quantity must be at least 1.")
-
-    def get_item_price(self):
-        if self.product:
-            return self.product.selling_price
-        if self.property_item:
-            return self.property_item.price
-        return 0
+        if self.variant:
+            if self.quantity < 1:
+                raise ValidationError("Variant quantity must be at least 1.")
+            if self.quantity > self.variant.stock:
+                raise ValidationError("Insufficient stock for this variant.")
 
     @property
-    def subtotal(self):   # ✅ NOW WORKS
-        return self.get_item_price() * self.quantity
+    def price(self):
+        if self.variant:
+            return self.variant.selling_price or self.variant.mrp
+        return self.property_item.total_property_value
+
+    @property
+    def subtotal(self):
+        return self.price * self.quantity
 
     def __str__(self):
-        if self.product:
-            return f"{self.user} - {self.product.product_name} x {self.quantity}"
+        if self.variant:
+            return f"{self.user} - {self.variant.sku} x {self.quantity}"
         return f"{self.user} - Property: {self.property_item.title}"

@@ -953,11 +953,67 @@ class DepartmentDetailView(APIView):
 
 # Meeting Requests
 
-class MeetingRequestListCreateView(APIView):
+class MeetingRequestListCreateView_old(APIView):
 
     def get(self, request):
         try:
             requests = MeetingRequest.objects.all().order_by('-request_id')
+
+            paginator = GlobalPagination()
+            paginated_requests = paginator.paginate_queryset(
+                requests,
+                request
+            )
+
+            serializer = MeetingRequestSerializer(
+                paginated_requests,
+                many=True
+            )
+
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def post(self, request):
+        try:
+            serializer = MeetingRequestSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {
+                        "message": "Meeting request created successfully",
+                        "data": serializer.data
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+class MeetingRequestListCreateView(APIView):
+
+    def get(self, request):
+        try:
+            user_id = request.query_params.get('user')  # <--- read `?user=`
+
+            requests = MeetingRequest.objects.all().order_by('-request_id')
+
+            if user_id:
+                requests = requests.filter(user_id=user_id)
 
             paginator = GlobalPagination()
             paginated_requests = paginator.paginate_queryset(
@@ -1718,145 +1774,6 @@ class LikeDetailView(APIView):
 
 
 
-# -------------------------------
-# Wishlist List & Create API
-# -------------------------------
-
-
-class WishlistListCreateView(APIView):
-    """
-    GET  → List all wishlists (paginated)
-    POST → Create a new wishlist
-    """
-
-    def get(self, request):
-        try:
-            wishlists = Wishlist.objects.all().order_by('-created_at')
-
-            paginator = GlobalPagination()
-            paginated_wishlists = paginator.paginate_queryset(
-                wishlists,
-                request
-            )
-
-            serializer = WishlistSerializer(
-                paginated_wishlists,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    def post(self, request):
-        try:
-            serializer = WishlistSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {
-                        "message": "Wishlist item created successfully",
-                        "data": serializer.data
-                    },
-                    status=status.HTTP_201_CREATED
-                )
-
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-# -------------------------------
-# Wishlist Detail (GET, PUT, DELETE)
-# -------------------------------
-class WishlistDetailView(APIView):
-    """
-    GET    → Retrieve a single wishlist item
-    PUT    → Update wishlist
-    DELETE → Remove wishlist
-    """
-    def get(self, request, wishlist_id):
-        try:
-            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
-            serializer = WishlistSerializer(wishlist)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def put(self, request, wishlist_id):
-        try:
-            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
-            serializer = WishlistSerializer(wishlist, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {"message": "Wishlist updated successfully", "data": serializer.data},
-                    status=status.HTTP_200_OK
-                )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def delete(self, request, wishlist_id):
-        try:
-            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
-            wishlist.delete()
-            return Response({"message": "Wishlist deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-
-
-
-
-
-
-class WishlistByUserAPIView(APIView):
-    """
-    GET → Retrieve all wishlist items for a given user (paginated)
-    """
-
-    def get(self, request, user_id):
-        try:
-            wishlists = (
-                Wishlist.objects
-                .filter(user_id=user_id)
-                .order_by('-created_at')
-            )
-
-            paginator = GlobalPagination()
-            paginated_wishlists = paginator.paginate_queryset(
-                wishlists,
-                request
-            )
-
-            serializer = WishlistSerializer(
-                paginated_wishlists,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
 
 from django.core.mail import send_mail
 from django.conf import settings
@@ -2270,11 +2187,151 @@ class ReferralPrefixDetailView(APIView):
 
 
 
+# -------------------------------
+# Wishlist List & Create API
+# -------------------------------
+
+
+class WishlistListCreateView_old(APIView):
+    """
+    GET  → List all wishlists (paginated)
+    POST → Create a new wishlist
+    """
+
+    def get(self, request):
+        try:
+            wishlists = Wishlist.objects.all().order_by('-created_at')
+
+            paginator = GlobalPagination()
+            paginated_wishlists = paginator.paginate_queryset(
+                wishlists,
+                request
+            )
+
+            serializer = WishlistSerializer(
+                paginated_wishlists,
+                many=True
+            )
+
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def post(self, request):
+        try:
+            serializer = WishlistSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {
+                        "message": "Wishlist item created successfully",
+                        "data": serializer.data
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+# -------------------------------
+# Wishlist Detail (GET, PUT, DELETE)
+# -------------------------------
+class WishlistDetailView_old(APIView):
+    """
+    GET    → Retrieve a single wishlist item
+    PUT    → Update wishlist
+    DELETE → Remove wishlist
+    """
+    def get(self, request, wishlist_id):
+        try:
+            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
+            serializer = WishlistSerializer(wishlist)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def put(self, request, wishlist_id):
+        try:
+            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
+            serializer = WishlistSerializer(wishlist, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {"message": "Wishlist updated successfully", "data": serializer.data},
+                    status=status.HTTP_200_OK
+                )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, wishlist_id):
+        try:
+            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
+            wishlist.delete()
+            return Response({"message": "Wishlist deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
 
-class CartListCreateView(APIView):
+
+
+
+
+
+class WishlistByUserAPIView_old(APIView):
+    """
+    GET → Retrieve all wishlist items for a given user (paginated)
+    """
+
+    def get(self, request, user_id):
+        try:
+            wishlists = (
+                Wishlist.objects
+                .filter(user_id=user_id)
+                .order_by('-created_at')
+            )
+
+            paginator = GlobalPagination()
+            paginated_wishlists = paginator.paginate_queryset(
+                wishlists,
+                request
+            )
+
+            serializer = WishlistSerializer(
+                paginated_wishlists,
+                many=True
+            )
+
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+
+
+
+
+class CartListCreateView_old(APIView):
 
     # 🔹 GET ALL CART ITEMS (ADMIN / INTERNAL)
     def get(self, request):
@@ -2355,7 +2412,7 @@ class CartListCreateView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class CartByUserAPIView(APIView):
+class CartByUserAPIView_old(APIView):
 
     
 
@@ -2379,7 +2436,7 @@ class CartByUserAPIView(APIView):
 
 
 
-class CartDetailView(APIView):
+class CartDetailView_old(APIView):
     def get(self, request, id):
         try:
             cart_item = get_object_or_404(Cart, id=id)
@@ -2424,6 +2481,335 @@ class CartDetailView(APIView):
             return Response({"error": str(e)}, status=500)
 
 
+
+
+
+from business.models import * 
+
+class WishlistListCreateView(APIView):
+
+    def get(self, request):
+        try:
+            user_id = request.query_params.get("user")
+
+            wishlists = Wishlist.objects.select_related("variant", "property_item", "user").order_by("-created_at")
+
+            if user_id:
+                wishlists = wishlists.filter(user_id=user_id)
+
+            paginator = GlobalPagination()
+            paginated_data = paginator.paginate_queryset(wishlists, request)
+            serializer = WishlistSerializer(paginated_data, many=True)
+
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    def post(self, request):
+        try:
+            variant_id = request.data.get("variant")
+            property_id = request.data.get("property_item")
+            user_id = request.data.get("user")
+
+            if not user_id:
+                return Response({"error": "User is required"}, status=400)
+
+            # MUST have either variant or property
+            if not variant_id and not property_id:
+                return Response({"error": "Variant or Property is required"}, status=400)
+
+            # Variant Wishlist
+            if variant_id:
+                variant = get_object_or_404(ProductVariant, id=variant_id)
+
+                wishlist_item, created = Wishlist.objects.get_or_create(
+                    user_id=user_id,
+                    variant=variant
+                )
+
+                if not created:
+                    return Response({"message": "Variant already in wishlist"}, status=200)
+
+            # Property Wishlist
+            if property_id:
+                property_item = get_object_or_404(Property, property_id=property_id)
+
+                wishlist_item, created = Wishlist.objects.get_or_create(
+                    user_id=user_id,
+                    property_item=property_item
+                )
+
+                if not created:
+                    return Response({"message": "Property already in wishlist"}, status=200)
+
+            return Response({"message": "Wishlist added successfully"}, status=201)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+class WishlistDetailView(APIView):
+
+    def get(self, request, wishlist_id):
+        try:
+            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
+            serializer = WishlistSerializer(wishlist)
+            return Response(serializer.data, status=200)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    def delete(self, request, wishlist_id):
+        try:
+            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
+            wishlist.delete()
+            return Response({"message": "Wishlist item removed"}, status=204)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+class CartListCreateView_old(APIView):
+
+    def get(self, request):
+        try:
+            user_id = request.query_params.get("user")
+
+            carts = Cart.objects.select_related("variant", "property_item", "user")
+
+            if user_id:
+                carts = carts.filter(user_id=user_id)
+
+            serializer = CartSerializer(carts, many=True)
+            total_amount = sum(item.subtotal for item in carts)
+
+            return Response({
+                "items": serializer.data,
+                "total_amount": total_amount
+            }, status=200)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    def post(self, request):
+        try:
+            user_id = request.data.get("user")
+            variant_id = request.data.get("variant")
+            property_id = request.data.get("property_item")
+            quantity = int(request.data.get("quantity", 1))
+
+            if not user_id:
+                return Response({"error": "user is required"}, status=400)
+
+            # PRODUCT VARIANT CART
+            if variant_id:
+                variant = get_object_or_404(ProductVariant, id=variant_id)
+
+                if quantity < 1:
+                    return Response({"error": "Quantity must be at least 1"}, status=400)
+
+                if variant.stock < quantity:
+                    return Response({"error": "Insufficient stock"}, status=400)
+
+                cart_item, created = Cart.objects.get_or_create(
+                    user_id=user_id,
+                    variant=variant,
+                    defaults={"quantity": quantity}
+                )
+
+                if not created:
+                    new_qty = cart_item.quantity + quantity
+                    if variant.stock < new_qty:
+                        return Response({"error": "Insufficient stock"}, status=400)
+                    cart_item.quantity = new_qty
+                    cart_item.save()
+
+            # PROPERTY CART
+            elif property_id:
+                property_item = get_object_or_404(Property, id=property_id)
+
+                if Cart.objects.filter(user_id=user_id, property_item=property_item).exists():
+                    return Response({"error": "Property already in cart"}, status=400)
+
+                Cart.objects.create(
+                    user_id=user_id,
+                    property_item=property_item,
+                    quantity=1
+                )
+
+            else:
+                return Response({"error": "Variant or Property is required"}, status=400)
+
+            return Response({"message": "Added to cart successfully"}, status=201)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+class CartListCreateView(APIView):
+
+    def get(self, request):
+        try:
+            user_id = request.query_params.get("user")
+
+            carts_qs = (
+                Cart.objects
+                .select_related("variant", "property_item", "user")
+                .all()
+            )
+
+            if user_id:
+                carts_qs = carts_qs.filter(user_id=user_id)
+
+            # 🔹 Total amount should be for FULL cart (not paginated)
+            #total_amount = sum(item.subtotal for item in carts_qs)
+
+            # 🔹 Pagination only for items
+            paginator = GlobalPagination()
+            paginated_carts = paginator.paginate_queryset(
+                carts_qs,
+                request
+            )
+
+            serializer = CartSerializer(paginated_carts, many=True)
+
+            # 🔹 Standard paginated response
+            response = paginator.get_paginated_response(serializer.data)
+
+            # 🔹 Add total_amount at top-level (BEST PRACTICE)
+            #response.data["total_amount"] = total_amount
+
+            return response
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def post(self, request):
+        try:
+            user_id = request.data.get("user")
+            variant_id = request.data.get("variant")
+            property_id = request.data.get("property_item")
+            quantity = int(request.data.get("quantity", 1))
+
+            if not user_id:
+                return Response(
+                    {"error": "user is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # PRODUCT VARIANT CART
+            if variant_id:
+                variant = get_object_or_404(ProductVariant, id=variant_id)
+
+                if quantity < 1:
+                    return Response(
+                        {"error": "Quantity must be at least 1"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                if variant.stock < quantity:
+                    return Response(
+                        {"error": "Insufficient stock"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                cart_item, created = Cart.objects.get_or_create(
+                    user_id=user_id,
+                    variant=variant,
+                    defaults={"quantity": quantity}
+                )
+
+                if not created:
+                    new_qty = cart_item.quantity + quantity
+                    if variant.stock < new_qty:
+                        return Response(
+                            {"error": "Insufficient stock"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    cart_item.quantity = new_qty
+                    cart_item.save()
+
+            # PROPERTY CART
+            elif property_id:
+                property_item = get_object_or_404(Property, property_id=property_id)
+
+                if Cart.objects.filter(
+                    user_id=user_id,
+                    property_item=property_item
+                ).exists():
+                    return Response(
+                        {"error": "Property already in cart"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                Cart.objects.create(
+                    user_id=user_id,
+                    property_item=property_item,
+                    quantity=1
+                )
+
+            else:
+                return Response(
+                    {"error": "Variant or Property is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            return Response(
+                {"message": "Added to cart successfully"},
+                status=status.HTTP_201_CREATED
+            )
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class CartDetailView(APIView):
+
+    def get(self, request, id):
+        try:
+            cart_item = get_object_or_404(Cart, id=id)
+            serializer = CartSerializer(cart_item)
+            return Response(serializer.data, status=200)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    def put(self, request, id):
+        try:
+            cart_item = get_object_or_404(Cart, id=id)
+
+            quantity = int(request.data.get("quantity", cart_item.quantity))
+
+            if cart_item.variant:
+                if quantity < 1:
+                    return Response({"error": "Quantity must be at least 1"}, status=400)
+
+                if quantity > cart_item.variant.stock:
+                    return Response({"error": "Insufficient stock"}, status=400)
+
+                cart_item.quantity = quantity
+                cart_item.save()
+
+            else:
+                # property item cannot change quantity
+                return Response({"error": "Cannot update quantity for property item"}, status=400)
+
+            return Response({"message": "Cart updated successfully"}, status=200)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+    def delete(self, request, id):
+        try:
+            cart_item = get_object_or_404(Cart, id=id)
+            cart_item.delete()
+            return Response({"message": "Cart item removed"}, status=204)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
 
 
 

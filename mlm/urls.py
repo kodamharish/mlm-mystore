@@ -26,6 +26,7 @@ urlpatterns = [
     path('',include('business.urls')),
     path('',include('subscription.urls')),
     path('',include('commissions.urls')),
+    path('',include('transactions.urls')),
 
     
 

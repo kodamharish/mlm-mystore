@@ -37,7 +37,7 @@ urlpatterns = [
     path('meeting-requests/<int:request_id>/', MeetingRequestDetailView.as_view(), name='meeting-request-detail'),
     path('scheduled-meetings/', ScheduledMeetingListCreateView.as_view(), name='scheduled-meetings'),
     path('scheduled-meetings/<int:scheduled_meeting_id>/', ScheduledMeetingDetailView.as_view(), name='scheduled-meeting-detail'),
-    path('meeting-requests/user-id/<int:user_id>/', MeetingRequestsByUserIdAPIView.as_view(), name='meeting-requests-user-id'),
+    #path('meeting-requests/user-id/<int:user_id>/', MeetingRequestsByUserIdAPIView.as_view(), name='meeting-requests-user-id'),
 
     path('leads/', LeadListCreateView.as_view(), name='lead-list-create'),
     path('leads/<int:id>/', LeadDetailView.as_view(), name='lead-detail'),
@@ -64,7 +64,7 @@ urlpatterns = [
     # Wishlist APIs
     path('wishlist/', WishlistListCreateView.as_view(), name='wishlist-list-create'),
     path('wishlist/<int:wishlist_id>/', WishlistDetailView.as_view(), name='wishlist-detail'),
-    path('wishlist/user-id/<int:user_id>/', WishlistByUserAPIView.as_view(), name='wishlist-by-user-id'),
+    #path('wishlist/user-id/<int:user_id>/', WishlistByUserAPIView.as_view(), name='wishlist-by-user-id'),
 
     path("chatbot/", ChatBotAPIView.as_view(), name="chatbot"),
     path("responses/", ChatResponseListCreateAPIView.as_view(), name="responses"),
@@ -78,7 +78,8 @@ urlpatterns = [
 
     path('cart/', CartListCreateView.as_view()),
     path('cart/cart-id/<int:id>/', CartDetailView.as_view()),
-    path('cart/user-id/<int:user_id>/', CartByUserAPIView.as_view()),
+    path('cart/<int:id>/', CartDetailView.as_view()),
+    #path('cart/user-id/<int:user_id>/', CartByUserAPIView.as_view()),
 
     path("referral-prefix/", ReferralPrefixListCreateView.as_view()),
     path("referral-prefix/<int:id>/", ReferralPrefixDetailView.as_view()),

@@ -123,14 +123,6 @@ class LikeSerializer(serializers.ModelSerializer):
 #         model = Wishlist
 #         fields = '__all__'
 
-from property.serializers import PropertySerializer
-
-class WishlistSerializer(serializers.ModelSerializer):
-    property_details = PropertySerializer(source='property', read_only=True)
-
-    class Meta:
-        model = Wishlist
-        fields = ['id', 'user', 'property', 'property_details', 'product','created_at']
 
 
 
@@ -156,13 +148,83 @@ class SiteVisitSerializer(serializers.ModelSerializer):
 
 
 
-class CartSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Cart
-        fields = '__all__'
+
 
 
 class ReferralPrefixSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReferralPrefix
         fields = "__all__"
+
+
+from property.serializers import PropertySerializer
+
+# class WishlistSerializer(serializers.ModelSerializer):
+#     property_details = PropertySerializer(source='property', read_only=True)
+
+#     class Meta:
+#         model = Wishlist
+#         fields = ['id', 'user', 'property', 'property_details', 'product','created_at']
+
+
+# class CartSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Cart
+#         fields = '__all__'
+
+
+
+
+
+
+from rest_framework import serializers
+from property.serializers import PropertySerializer
+from business.serializers import ProductVariantSerializer
+from .models import Wishlist
+
+class WishlistSerializer(serializers.ModelSerializer):
+    variant_details = ProductVariantSerializer(source='variant', read_only=True)
+    property_details = PropertySerializer(source='property_item', read_only=True)
+
+    class Meta:
+        model = Wishlist
+        fields = [
+            'id',
+            'user',
+            'variant',
+            'variant_details',
+            'property_item',
+            'property_details',
+            'created_at'
+        ]
+
+
+from rest_framework import serializers
+from property.serializers import PropertySerializer
+from business.serializers import ProductVariantSerializer
+from .models import Cart
+
+class CartSerializer(serializers.ModelSerializer):
+    variant_details = ProductVariantSerializer(source='variant', read_only=True)
+    property_details = PropertySerializer(source='property_item', read_only=True)
+    subtotal = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Cart
+        fields = [
+            'id',
+            'user',
+            'variant',
+            'variant_details',
+            'property_item',
+            'property_details',
+            'quantity',
+            'subtotal',
+            'created_at'
+        ]
+
+    def get_subtotal(self, obj):
+        return obj.subtotal
+
+
+

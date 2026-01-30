@@ -2,7 +2,7 @@ import django_filters
 from django.db.models import Q, Min, Max
 from .models import Business, Product, ProductVariant
 from .models import *
-
+from django.db.models import F, ExpressionWrapper, DecimalField
 
 
 import django_filters
@@ -497,10 +497,24 @@ class ProductFilter(django_filters.FilterSet):
     category_id = django_filters.NumberFilter(method='filter_category_id')
     variant_id = django_filters.NumberFilter(method='filter_variant_id')
     user_id = django_filters.NumberFilter(method='filter_user_products')
+    exclude_user_id = django_filters.NumberFilter(method='filter_exclude_user_products')
+    #exclude_user_id = django_filters.NumberFilter(method='filter_exclude_user')
+
+
     
     def filter_user_products(self, queryset, name, value):
         qs = queryset.filter(business__user_id=value).distinct()
         return qs if qs.exists() else queryset.none()
+
+    
+    def filter_exclude_user_products(self, queryset, name, value):
+        qs = queryset.exclude(business__user_id=value).distinct()
+        return qs if qs.exists() else queryset.none()
+
+    # def filter_exclude_user(self, queryset, name, value):
+    #     return queryset.exclude(business__user_id=value).distinct()
+
+
 
 
 

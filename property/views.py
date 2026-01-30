@@ -215,72 +215,6 @@ class PropertyTypeByCategoryIDView(APIView):
 
 # ------------------ Property Views ------------------
 
-
-
-class PropertyListCreateView_old(APIView):
-
-    def get(self, request):
-        try:
-            properties = Property.objects.all().order_by('-property_id')
-
-            paginator = GlobalPagination()
-            paginated_properties = paginator.paginate_queryset(properties, request)
-
-            user_properties = (
-                UserProperty.objects
-                .select_related('user')
-                .filter(property__in=paginated_properties)
-            )
-
-            # ✅ FIXED: Use property_id
-            user_property_map = {
-                up.property.property_id: up for up in user_properties
-            }
-
-            response_data = []
-
-            for prop in paginated_properties:
-                prop_data = PropertySerializer(prop).data
-
-                up = user_property_map.get(prop.property_id)
-
-                if up:
-                    user_info = UserSerializer(up.user).data
-                    prop_data["buyer_user"] = {
-                        **user_info,
-                        "booking_date": up.booking_date,
-                        "purchase_date": up.purchase_date
-                    }
-                else:
-                    prop_data["buyer_user"] = None
-
-                response_data.append(prop_data)
-
-            return paginator.get_paginated_response(response_data)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def post(self, request):
-        try:
-            serializer = PropertySerializer(
-                data=request.data,
-                context={'request': request}
-            )
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-
 class PropertyListCreateView(APIView):
 
     def get(self, request):
@@ -374,15 +308,27 @@ class PropertyListCreateView(APIView):
 
 
 
-
-
-
 class GlobalNotificationListView(APIView):
+    """
+    GET → List global notifications for a user (paginated)
+    """
+
     def get(self, request, user_id):
         try:
             user = User.objects.get(user_id=user_id)
 
-            statuses = UserNotificationStatus.objects.filter(user=user).select_related('notification')
+            statuses_qs = (
+                UserNotificationStatus.objects
+                .filter(user=user)
+                .select_related('notification', 'notification__property')
+                .order_by('-notification__created_at')
+            )
+
+            paginator = GlobalPagination()
+            paginated_statuses = paginator.paginate_queryset(
+                statuses_qs,
+                request
+            )
 
             data = [
                 {
@@ -396,13 +342,23 @@ class GlobalNotificationListView(APIView):
                     "created_at": s.notification.created_at,
                     "is_read": s.is_read
                 }
-                for s in statuses.order_by('-notification__created_at')
+                for s in paginated_statuses
             ]
-            return Response(data, status=status.HTTP_200_OK)
+
+            return paginator.get_paginated_response(data)
 
         except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 
 class MarkNotificationReadView(APIView):
@@ -451,7 +407,9 @@ class PropertyDetailView(APIView):
             property_instance = self.get_object(property_id)
 
             # Store old approval status before updating
-            old_status = property_instance.approval_status
+            #old_status = property_instance.approval_status
+            old_status = property_instance.verification_status
+
 
             serializer = PropertySerializer(
                 property_instance, 
@@ -464,7 +422,10 @@ class PropertyDetailView(APIView):
                 updated_property = serializer.save()
 
                 # 🔥 Trigger notification only if status changed to APPROVED
-                if old_status != "approved" and updated_property.approval_status == "approved":
+                # if old_status != "approved" and updated_property.approval_status == "approved":
+                #     self.create_approval_notification(updated_property)
+
+                if old_status != "verified" and updated_property.verification_status == "verified":
                     self.create_approval_notification(updated_property)
 
                 return Response(serializer.data, status=status.HTTP_200_OK)
