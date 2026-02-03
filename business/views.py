@@ -10,7 +10,6 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
 from property.models import  *
-import random
 from django.core.mail import send_mail
 from django.utils.cache import caches
 from mlm.settings import *
@@ -22,133 +21,14 @@ from urllib.parse import quote  # ✅ for URL encoding
 from django.core.cache import cache
 from django.conf import settings
 from mlm.pagination import GlobalPagination
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import status
-from django.shortcuts import get_object_or_404
 from django.db import transaction
-
-from .models import Business, Product, ProductVariant, ProductMedia
-from .serializers import BusinessSerializer, ProductSerializer
-
-from .filters import BusinessFilter, ProductFilter
 from .filters import *
-
 import json
-from django.db import transaction
-from django.shortcuts import get_object_or_404
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.views import APIView
+from users.models import *
 
 
 
-
-class CategoryListCreateView_old(APIView):
-
-    
-
-    def get(self, request):
-        try:
-            queryset = Category.objects.all().order_by('-category_id')
-
-            # ---------------- FILTERS ----------------
-            search = request.GET.get('search')
-            level = request.GET.get('level')
-            parent = request.GET.get('parent')
-            slug = request.GET.get('slug')
-            is_active = request.GET.get('is_active')
-
-            if search:
-                queryset = queryset.filter(
-                    Q(name__icontains=search) |
-                    Q(slug__icontains=search)
-                )
-
-            if level:
-                queryset = queryset.filter(level__iexact=level)
-
-            if parent:
-                queryset = queryset.filter(parent_id=parent)
-
-            if slug:
-                queryset = queryset.filter(slug=slug)
-
-            if is_active is not None:
-                queryset = queryset.filter(is_active=is_active.lower() == 'true')
-
-            # ---------------- PAGINATION ----------------
-            paginator = GlobalPagination()
-            page = paginator.paginate_queryset(queryset, request)
-            serializer = CategorySerializer(page, many=True)
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    def post(self, request):
-        try:
-            serializer = CategorySerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {"message": "Category created successfully", "data": serializer.data},
-                    status=status.HTTP_201_CREATED
-                )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-class CategoryListCreateView_new1(APIView):
-
-    def get(self, request):
-        try:
-            queryset = Category.objects.all().order_by('-category_id')
-
-            # Apply filters
-            category_filter = CategoryFilter(request.GET, queryset=queryset)
-            queryset = category_filter.qs
-
-            # Pagination
-            paginator = GlobalPagination()
-            page = paginator.paginate_queryset(queryset, request)
-            serializer = CategorySerializer(page, many=True)
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    def post(self, request):
-        try:
-            serializer = CategorySerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {"message": "Category created successfully", "data": serializer.data},
-                    status=status.HTTP_201_CREATED
-                )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
 
 
@@ -507,144 +387,8 @@ class OfferByUserView(APIView):
 
 
 
-class ProductListCreateView_old(APIView):
-
-    # def get(self, request):
-    #     try:
-    #         queryset = Product.objects.select_related(
-    #             'business', 'category'
-    #         ).prefetch_related(
-    #             'variants__media'
-    #         ).order_by('-created_at')
-    #         # ✅ django-filters (Product + Variant level)
-    #         queryset = ProductFilter(
-    #             request.GET,
-    #             queryset=queryset
-    #         ).qs
-
-    #         paginator = GlobalPagination()
-    #         paginated_qs = paginator.paginate_queryset(queryset, request)
-    #         serializer = ProductSerializer(paginated_qs, many=True)
-    #         return paginator.get_paginated_response(serializer.data)
-
-    #     except Exception as e:
-    #         return Response({"error": str(e)}, status=500)
-
-    def get(self, request):
-        queryset = Product.objects.select_related(
-            'business', 'category'
-        ).prefetch_related(
-            'variants__media'
-        ).order_by('-created_at')
-
-        queryset = ProductFilter(request.GET, queryset=queryset).qs
-
-        variant_id = request.GET.get('variant_id')
-
-        if variant_id:
-            queryset = queryset.filter(variants__id=variant_id).distinct()
-
-            for product in queryset:
-                product._filtered_variants = product.variants.filter(id=variant_id)
-
-        paginator = GlobalPagination()
-        paginated_qs = paginator.paginate_queryset(queryset, request)
-
-        # inject filtered variants into serializer output
-        data = ProductSerializer(paginated_qs, many=True).data
-
-        if variant_id:
-            for item, product in zip(data, paginated_qs):
-                item["variants"] = ProductVariantSerializer(product._filtered_variants, many=True).data
-
-        return paginator.get_paginated_response(data)
-
-
-    @transaction.atomic
-    def post(self, request):
-        try:
-            product_data = request.data.get('product')
-            variants_data = request.data.get('variants', [])
-
-            # parse JSON if coming as string (from Postman)
-            if isinstance(product_data, str):
-                product_data = json.loads(product_data)
-            if isinstance(variants_data, str):
-                variants_data = json.loads(variants_data)
-
-            if not product_data:
-                return Response({"error": "Product data is required"}, status=400)
-
-            business = get_object_or_404(Business, business_id=product_data.get('business'))
-
-            product = Product.objects.create(
-                business=business,
-                product_name=product_data.get('product_name'),
-                description=product_data.get('description'),
-                brand=product_data.get('brand'),
-                category_id=product_data.get('category'),
-                attributes=product_data.get('attributes'),
-                verification_status='pending'
-            )
-
-            # create variants + media
-            for v in variants_data:
-                variant = ProductVariant.objects.create(
-                    product=product,
-                    **{k: v[k] for k in v if k not in ('id', 'media')}
-                )
-
-                media_list = v.get('media', [])
-                for m in media_list:
-                    uploaded = request.FILES.get('media_file')
-                    if uploaded:
-                        ProductMedia.objects.create(
-                            product=product,
-                            variant=variant,
-                            media_type=m.get('media_type', 'image'),
-                            file=uploaded
-                        )
-
-            return Response({"message": "Product created", "product_id": product.product_id}, status=201)
-
-        except Exception as e:
-            transaction.set_rollback(True)
-            return Response({"error": str(e)}, status=500)
-
-
-
 class ProductListCreateView(APIView):
 
-    # def get(self, request):
-    #     queryset = Product.objects.select_related(
-    #         'business', 'category'
-    #     ).prefetch_related(
-    #         'variants__media'
-    #     ).order_by('-created_at')
-
-    #     queryset = ProductFilter(request.GET, queryset=queryset).qs
-
-    #     variant_id = request.GET.get('variant_id')
-
-    #     if variant_id:
-    #         queryset = queryset.filter(variants__id=variant_id).distinct()
-
-    #         for product in queryset:
-    #             product._filtered_variants = product.variants.filter(id=variant_id)
-
-    #     paginator = GlobalPagination()
-    #     paginated_qs = paginator.paginate_queryset(queryset, request)
-
-    #     # inject filtered variants into serializer output
-    #     data = ProductSerializer(paginated_qs, many=True).data
-
-    #     if variant_id:
-    #         for item, product in zip(data, paginated_qs):
-    #             item["variants"] = ProductVariantSerializer(product._filtered_variants, many=True).data
-
-    #     return paginator.get_paginated_response(data)
-
-    
     def get(self, request):
         queryset = Product.objects.select_related(
             'business', 'category'
@@ -680,15 +424,12 @@ class ProductListCreateView(APIView):
 
         return paginator.get_paginated_response(data)
 
-
-
     @transaction.atomic
     def post(self, request):
         try:
             product_data = request.data.get('product')
             variants_data = request.data.get('variants', [])
 
-            # parse JSON if coming as string (from Postman)
             if isinstance(product_data, str):
                 product_data = json.loads(product_data)
             if isinstance(variants_data, str):
@@ -709,7 +450,6 @@ class ProductListCreateView(APIView):
                 verification_status='pending'
             )
 
-            # create variants + media
             for v in variants_data:
                 variant = ProductVariant.objects.create(
                     product=product,
@@ -727,155 +467,67 @@ class ProductListCreateView(APIView):
                             file=uploaded
                         )
 
+            # 🔥 Notify Admins on new product
+            self.notify_admin_new_product(product)
+
             return Response({"message": "Product created", "product_id": product.product_id}, status=201)
 
         except Exception as e:
             transaction.set_rollback(True)
             return Response({"error": str(e)}, status=500)
 
+    # 🔥 Admin Notification
+    def notify_admin_new_product_old(self, product):
+        admin_users = User.objects.filter(roles__role_name="Admin").distinct()
+
+        notification = Notification.objects.create(
+            message=f"New Product Added: {product.product_name}",
+            
+        )
+
+        notification.visible_to_users.set(admin_users)
+
+        UserNotificationStatus.objects.bulk_create([
+            UserNotificationStatus(user=user, notification=notification, is_read=False)
+            for user in admin_users
+        ])
+    def notify_admin_new_product(self, product):
+        admin_users = User.objects.filter(roles__role_name="Admin").distinct()
+
+        variants = product.variants.all()
+
+        notifications = []
+
+        for variant in variants:
+            notification = Notification.objects.create(
+                message=f"New Product Added: {product.product_name} (SKU: {variant.sku})",
+                product=product,
+                product_variant=variant
+            )
+
+            notification.visible_to_users.set(admin_users)
+
+            notifications.append(notification)
+
+        # Create unread status for all admins
+        status_objects = []
+        for notification in notifications:
+            for user in admin_users:
+                status_objects.append(
+                    UserNotificationStatus(
+                        user=user,
+                        notification=notification,
+                        is_read=False
+                    )
+                )
+
+        UserNotificationStatus.objects.bulk_create(status_objects)
+
+
 
 # -------------------------------
 # Product Detail (GET, PUT, DELETE)
 # -------------------------------
-
-class ProductDetailView_old(APIView):
-
-    # def get(self, request, product_id):
-    #     try:
-    #         product = get_object_or_404(
-    #             Product.objects.prefetch_related('variants__media'),
-    #             product_id=product_id
-    #         )
-    #         serializer = ProductSerializer(product)
-    #         return Response(serializer.data, status=200)
-
-    #     except Exception as e:
-    #         return Response({"error": str(e)}, status=500)
-    def get(self, request, product_id):
-        product = get_object_or_404(
-            Product.objects.prefetch_related('variants__media'),
-            product_id=product_id
-        )
-
-        variant_id = request.GET.get('variant_id')
-
-        if variant_id:
-            if not product.variants.filter(id=variant_id).exists():
-                return Response({"error": "Variant not found for this product"}, status=404)
-
-            product._filtered_variants = product.variants.filter(id=variant_id)
-            data = ProductSerializer(product).data
-            data["variants"] = ProductVariantSerializer(product._filtered_variants, many=True).data
-            return Response(data, status=200)
-
-        return Response(ProductSerializer(product).data, status=200)
-
-   
-
-
-    @transaction.atomic
-    def put(self, request, product_id):
-        try:
-            product = get_object_or_404(Product, product_id=product_id)
-
-            product_data = request.data.get('product')
-            variants_data = request.data.get('variants', [])
-
-            # parse JSON if sent as text
-            if isinstance(product_data, str):
-                product_data = json.loads(product_data)
-            if isinstance(variants_data, str):
-                variants_data = json.loads(variants_data)
-
-            # update product
-            if product_data:
-                for field, value in product_data.items():
-                    setattr(product, field, value)
-                product.save()
-
-            # update variants + media
-            for v in variants_data:
-                variant_id = v.get('id')
-                media_list = v.get('media', [])
-
-                variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
-                if not variant:
-                    continue
-
-                for field, value in v.items():
-                    if field not in ('id', 'media'):
-                        setattr(variant, field, value)
-                variant.save()
-
-                # update media inside variant
-                for m in media_list:
-                    media_id = m.get('id')
-                    uploaded = request.FILES.get('media_file')
-
-                    if media_id:
-                        media_obj = ProductMedia.objects.filter(
-                            id=media_id, variant=variant, product=product
-                        ).first()
-
-                        if media_obj:
-                            for field, value in m.items():
-                                if field not in ('id', 'file'):
-                                    setattr(media_obj, field, value)
-                            if uploaded:
-                                media_obj.file = uploaded
-                            media_obj.save()
-
-                    else:
-                        # new media append
-                        if uploaded:
-                            ProductMedia.objects.create(
-                                product=product,
-                                variant=variant,
-                                media_type=m.get('media_type', 'image'),
-                                file=uploaded,
-                                sort_order=m.get('sort_order', 0)
-                            )
-
-            return Response({"message": "Product updated successfully"}, status=200)
-
-        except Exception as e:
-            transaction.set_rollback(True)
-            return Response({"error": str(e)}, status=500)
-
-    def delete(self, request, product_id):
-        try:
-            variant_param = request.query_params.get('variants')
-            media_param = request.query_params.get('media')
-
-            if media_param:
-                ids = [int(i) for i in media_param.split(',') if i.isdigit()]
-                deleted, _ = ProductMedia.objects.filter(
-                    product_id=product_id, id__in=ids
-                ).delete()
-                return Response({"message": f"{deleted} media deleted"}, status=200)
-
-            if variant_param:
-                ids = [int(i) for i in variant_param.split(',') if i.isdigit()]
-                deleted, _ = ProductVariant.objects.filter(
-                    product_id=product_id, id__in=ids
-                ).delete()
-                return Response({"message": f"{deleted} variants deleted"}, status=200)
-
-            # delete full product
-            get_object_or_404(Product, product_id=product_id).delete()
-            return Response({"message": "Product deleted"}, status=204)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-
-
-
-
-from users.models import *
-
-
 
 class ProductDetailView(APIView):
 
@@ -906,19 +558,16 @@ class ProductDetailView(APIView):
             product_data = request.data.get('product')
             variants_data = request.data.get('variants', [])
 
-            # parse JSON if sent as text
             if isinstance(product_data, str):
                 product_data = json.loads(product_data)
             if isinstance(variants_data, str):
                 variants_data = json.loads(variants_data)
 
-            # update product
             if product_data:
                 for field, value in product_data.items():
                     setattr(product, field, value)
                 product.save()
 
-            # update variants + media
             for v in variants_data:
                 variant_id = v.get('id')
                 media_list = v.get('media', [])
@@ -927,7 +576,6 @@ class ProductDetailView(APIView):
                 if not variant:
                     continue
 
-                # ✅ store old variant status
                 old_variant_status = variant.verification_status
 
                 for field, value in v.items():
@@ -935,11 +583,15 @@ class ProductDetailView(APIView):
                         setattr(variant, field, value)
                 variant.save()
 
-                # ✅ Trigger notification if variant status changed to VERIFIED
+                # 🔥 VERIFIED FLOW
                 if old_variant_status != "verified" and variant.verification_status == "verified":
-                    self.create_variant_approval_notification(variant)
+                    self.notify_owner_verified(variant)
+                    self.notify_agents_clients_verified(variant)
 
-                # update media inside variant
+                # 🔥 REJECTED FLOW
+                if old_variant_status != "rejected" and variant.verification_status == "rejected":
+                    self.notify_owner_rejected(variant)
+
                 for m in media_list:
                     media_id = m.get('id')
                     uploaded = request.FILES.get('media_file')
@@ -958,7 +610,6 @@ class ProductDetailView(APIView):
                             media_obj.save()
 
                     else:
-                        # new media append
                         if uploaded:
                             ProductMedia.objects.create(
                                 product=product,
@@ -993,36 +644,68 @@ class ProductDetailView(APIView):
                 ).delete()
                 return Response({"message": f"{deleted} variants deleted"}, status=200)
 
-            # delete full product
             get_object_or_404(Product, product_id=product_id).delete()
             return Response({"message": "Product deleted"}, status=204)
 
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
-    # 🔥 NEW: Variant Verification Notification
-    def create_variant_approval_notification(self, variant):
-        added_by = variant.product.business.user  # product owner
-
-        # Notify all users except creator
-        users_to_notify = User.objects.exclude(user_id=added_by.user_id)
+    # 🔥 Owner Verified
+    def notify_owner_verified(self, variant):
+        owner = variant.product.business.user
 
         notification = Notification.objects.create(
-            message=f"Variant Verified: {variant.product.product_name} (SKU: {variant.sku})",
+            message=f"Your product '{variant.product.product_name}' variant (SKU: {variant.sku}) has been verified.",
+            product=variant.product,
             product_variant=variant
+        )
+
+        notification.visible_to_users.set([owner])
+
+        UserNotificationStatus.objects.create(
+            user=owner,
+            notification=notification,
+            is_read=False
+        )
+
+    # 🔥 Agents + Clients Verified
+    def notify_agents_clients_verified(self, variant):
+        owner = variant.product.business.user
+
+        users_to_notify = User.objects.filter(
+            roles__role_name__in=["Agent", "Client"]
+        ).exclude(user_id=owner.user_id).distinct()
+
+        notification = Notification.objects.create(
+            message=f"New Verified Product Available: {variant.product.product_name}",
+            product_variant=variant,
+            product=variant.product
         )
 
         notification.visible_to_users.set(users_to_notify)
 
         UserNotificationStatus.objects.bulk_create([
-            UserNotificationStatus(
-                user=user,
-                notification=notification,
-                is_read=False
-            )
+            UserNotificationStatus(user=user, notification=notification, is_read=False)
             for user in users_to_notify
         ])
 
+    # 🔥 Owner Rejected
+    def notify_owner_rejected(self, variant):
+        owner = variant.product.business.user
+
+        notification = Notification.objects.create(
+            message=f"Your product '{variant.product.product_name}' variant (SKU: {variant.sku}) was rejected.",
+            product_variant=variant,
+            product=variant.product
+        )
+
+        notification.visible_to_users.set([owner])
+
+        UserNotificationStatus.objects.create(
+            user=owner,
+            notification=notification,
+            is_read=False
+        )
 
 # ------------------------------------
 # Get Products by Business ID

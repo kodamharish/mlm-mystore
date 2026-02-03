@@ -12,8 +12,11 @@ from users.models import *
 from users.serializers import *
 from django.db.models import Q
 from django.db.models import Sum
-from .filters import PropertyFilter
+from .filters import *
 from mlm.pagination import GlobalPagination
+
+
+
 
 
 # ------------------ Property Category Views ------------------
@@ -215,18 +218,13 @@ class PropertyTypeByCategoryIDView(APIView):
 
 # ------------------ Property Views ------------------
 
+
 class PropertyListCreateView(APIView):
 
     def get(self, request):
         try:
-            # ---------------------------------------
-            # 1️⃣ BASE QUERYSET
-            # ---------------------------------------
             queryset = Property.objects.all()
 
-            # ---------------------------------------
-            # 2️⃣ ROLE-BASED FILTER (OPTIONAL)
-            # ---------------------------------------
             role_name = request.GET.get('role')
 
             if role_name:
@@ -241,21 +239,12 @@ class PropertyListCreateView(APIView):
                 users_with_role = User.objects.filter(roles=role)
                 queryset = queryset.filter(user_id__in=users_with_role)
 
-            # ---------------------------------------
-            # 3️⃣ APPLY PROPERTY FILTER (Django Filters)
-            # ---------------------------------------
             filterset = PropertyFilter(data=request.GET, queryset=queryset)
             if not filterset.is_valid():
-                return Response(
-                    filterset.errors,
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                return Response(filterset.errors, status=status.HTTP_400_BAD_REQUEST)
 
             queryset = filterset.qs
 
-            # ---------------------------------------
-            # 4️⃣ APPLY ORDERING
-            # ---------------------------------------
             ordering = request.GET.get('ordering')
             allowed = [
                 'created_at', '-created_at',
@@ -263,30 +252,18 @@ class PropertyListCreateView(APIView):
             ]
             queryset = queryset.order_by(ordering if ordering in allowed else '-created_at')
 
-            # ---------------------------------------
-            # 5️⃣ OPTIMIZE QUERYSET
-            # ---------------------------------------
             queryset = queryset.select_related(
                 'category', 'property_type'
-            ).prefetch_related(
-                'amenities'
-            )
+            ).prefetch_related('amenities')
 
-            # ---------------------------------------
-            # 6️⃣ PAGINATION
-            # ---------------------------------------
             paginator = GlobalPagination()
             paginated_queryset = paginator.paginate_queryset(queryset, request)
 
             serializer = PropertySerializer(paginated_queryset, many=True)
-
             return paginator.get_paginated_response(serializer.data)
 
         except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request):
         try:
@@ -294,18 +271,35 @@ class PropertyListCreateView(APIView):
                 data=request.data,
                 context={'request': request}
             )
+
             if serializer.is_valid():
-                serializer.save()
+                property_instance = serializer.save()
+
+                # 🔥 Notify Admins on new property
+                self.notify_admin_new_property(property_instance)
+
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
 
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    # 🔥 Admin Notification
+    def notify_admin_new_property(self, property_instance):
+        admin_users = User.objects.filter(roles__role_name="Admin").distinct()
+
+        notification = Notification.objects.create(
+            message=f"New Property Added: {property_instance.property_title}",
+            property=property_instance
+        )
+
+        notification.visible_to_users.set(admin_users)
+
+        UserNotificationStatus.objects.bulk_create([
+            UserNotificationStatus(user=user, notification=notification, is_read=False)
+            for user in admin_users
+        ])
 
 
 class GlobalNotificationListView(APIView):
@@ -361,199 +355,6 @@ class GlobalNotificationListView(APIView):
 
 
 
-class MarkNotificationReadView_old(APIView):
-    def post(self, request):
-        user_id = request.data.get('user_id')
-        notification_id = request.data.get('notification_id')
-
-        if not user_id or not notification_id:
-            return Response({'error': 'user_id and notification_id are required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            user = User.objects.get(user_id=user_id)
-
-            status_obj = UserNotificationStatus.objects.get(
-                user=user,
-                id=notification_id
-            )
-            status_obj.is_read = True
-            status_obj.save()
-
-            return Response({'message': 'Notification marked as read'}, status=status.HTTP_200_OK)
-
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        except UserNotificationStatus.DoesNotExist:
-            return Response({'error': 'Notification not found for user'}, status=status.HTTP_404_NOT_FOUND)
-
-
-class NotificationListView_new1(APIView):
-    """
-    GET → List notifications for a specific user
-    """
-
-    def get(self, request):
-        try:
-            user_id = request.query_params.get("user")
-
-            if not user_id:
-                return Response(
-                    {"error": "user parameter is required"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            user = User.objects.get(user_id=user_id)
-
-            is_read_filter = request.query_params.get("is_read")
-
-            statuses_qs = UserNotificationStatus.objects.filter(user=user)
-
-            # 🔥 FILTER SUPPORT
-            if is_read_filter is not None:
-                if is_read_filter.lower() == "true":
-                    statuses_qs = statuses_qs.filter(is_read=True)
-                elif is_read_filter.lower() == "false":
-                    statuses_qs = statuses_qs.filter(is_read=False)
-
-            statuses_qs = statuses_qs.select_related(
-                "notification",
-                "notification__property"
-            ).order_by("-notification__created_at")
-
-            paginator = GlobalPagination()
-            paginated_statuses = paginator.paginate_queryset(
-                statuses_qs,
-                request
-            )
-
-            data = [
-                {
-                    "notification_status_id": s.id,
-                    "notification_id": s.notification.id,
-                    "message": s.notification.message,
-                    "property": {
-                        "id": s.notification.property.property_id,
-                        "title": s.notification.property.property_title
-                    },
-                    "created_at": s.notification.created_at,
-                    "is_read": s.is_read
-                }
-                for s in paginated_statuses
-            ]
-
-            unread_count = UserNotificationStatus.objects.filter(
-                user=user,
-                is_read=False
-            ).count()
-
-            response = paginator.get_paginated_response(data)
-            response.data["unread_count"] = unread_count
-
-            return response
-
-        except User.DoesNotExist:
-            return Response(
-                {"error": "User not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-
-
-
-class NotificationListView_new2(APIView):
-    """
-    GET → List notifications
-    Optional filters:
-        ?user=<id>
-        ?is_read=true/false
-    """
-
-    def get(self, request):
-        try:
-            user_id = request.query_params.get("user")
-            is_read_filter = request.query_params.get("is_read")
-
-            statuses_qs = UserNotificationStatus.objects.all()
-
-            # ✅ Filter by user (optional)
-            if user_id:
-                try:
-                    user = User.objects.get(user_id=user_id)
-                    statuses_qs = statuses_qs.filter(user=user)
-                except User.DoesNotExist:
-                    return Response(
-                        {"error": "User not found"},
-                        status=status.HTTP_404_NOT_FOUND
-                    )
-
-            # ✅ Filter by read/unread
-            if is_read_filter is not None:
-                if is_read_filter.lower() == "true":
-                    statuses_qs = statuses_qs.filter(is_read=True)
-                elif is_read_filter.lower() == "false":
-                    statuses_qs = statuses_qs.filter(is_read=False)
-
-            statuses_qs = statuses_qs.select_related(
-                "notification",
-                "notification__property"
-            ).order_by("-notification__created_at")
-
-            paginator = GlobalPagination()
-            paginated_statuses = paginator.paginate_queryset(
-                statuses_qs,
-                request
-            )
-
-            data = [
-                {
-                    "notification_status_id": s.id,
-                    "notification_id": s.notification.id,
-                    "message": s.notification.message,
-                    "property": {
-                        "id": s.notification.property.property_id,
-                        "title": s.notification.property.property_title
-                    },
-                    "created_at": s.notification.created_at,
-                    "is_read": s.is_read
-                }
-                for s in paginated_statuses
-            ]
-
-            # ✅ Unread count (only if user filter applied)
-            unread_count = None
-            read_count = None
-            if user_id:
-                unread_count = UserNotificationStatus.objects.filter(
-                    user_id=user_id,
-                    is_read=False
-                ).count()
-                read_count = UserNotificationStatus.objects.filter(
-                    user_id=user_id,
-                    is_read=True
-                ).count()
-
-            response = paginator.get_paginated_response(data)
-
-            if unread_count is not None:
-                response.data["unread_count"] = unread_count
-                response.data["unread_count"] = unread_count
-
-            return response
-
-        except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
 
 
 
@@ -592,7 +393,9 @@ class NotificationListView(APIView):
 
             statuses_qs = statuses_qs.select_related(
                 "notification",
-                "notification__property"
+                "notification__property",
+                "notification__product_variant",
+                "notification__product_variant__product"
             ).order_by("-notification__created_at")
 
             paginator = GlobalPagination()
@@ -601,22 +404,39 @@ class NotificationListView(APIView):
                 request
             )
 
-            data = [
-                {
-                    "notification_status_id": s.id,
-                    "notification_id": s.notification.id,
-                    "message": s.notification.message,
-                    "property": {
-                        "id": s.notification.property.property_id,
-                        "title": s.notification.property.property_title
-                    },
-                    "created_at": s.notification.created_at,
-                    "is_read": s.is_read
-                }
-                for s in paginated_statuses
-            ]
+            data = []
 
-            # ✅ Read / Unread Counts (only when user filter applied)
+            for s in paginated_statuses:
+                notification = s.notification
+
+                property_data = None
+                product_data = None
+
+                # ✅ Property Notification
+                if notification.property:
+                    property_data = {
+                        "id": notification.property.property_id,
+                        "title": notification.property.property_title
+                    }
+
+                # ✅ Product Variant Notification
+                if notification.product_variant:
+                    product_data = {
+                        "variant_id": notification.product_variant.id,
+                        "product_name": notification.product_variant.product.product_name
+                    }
+
+                data.append({
+                    "notification_status_id": s.id,
+                    "notification_id": notification.id,
+                    "message": notification.message,
+                    "property": property_data,
+                    "product": product_data,
+                    "created_at": notification.created_at,
+                    "is_read": s.is_read
+                })
+
+            # ✅ Read / Unread Counts
             read_count = None
             unread_count = None
 
@@ -673,6 +493,9 @@ class MarkNotificationReadView(APIView):
 
 
 
+
+
+
 class PropertyDetailView(APIView):
 
     def get_object(self, property_id):
@@ -689,28 +512,26 @@ class PropertyDetailView(APIView):
     def put(self, request, property_id):
         try:
             property_instance = self.get_object(property_id)
-
-            # Store old approval status before updating
-            #old_status = property_instance.approval_status
             old_status = property_instance.verification_status
 
-
             serializer = PropertySerializer(
-                property_instance, 
-                data=request.data, 
-                partial=True, 
+                property_instance,
+                data=request.data,
+                partial=True,
                 context={'request': request}
             )
 
             if serializer.is_valid():
                 updated_property = serializer.save()
 
-                # 🔥 Trigger notification only if status changed to APPROVED
-                # if old_status != "approved" and updated_property.approval_status == "approved":
-                #     self.create_approval_notification(updated_property)
-
+                # 🔥 VERIFIED FLOW
                 if old_status != "verified" and updated_property.verification_status == "verified":
-                    self.create_approval_notification(updated_property)
+                    self.notify_owner_verified(updated_property)
+                    self.notify_agents_clients_verified(updated_property)
+
+                # 🔥 REJECTED FLOW
+                if old_status != "rejected" and updated_property.verification_status == "rejected":
+                    self.notify_owner_rejected(updated_property)
 
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -727,215 +548,60 @@ class PropertyDetailView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # 🔥 NEW: Helper method to create notification only when approved
-    def create_approval_notification(self, property_instance):
-        added_by = property_instance.user_id  # User who added property
-
-        # Notify all users except the property creator
-        users_to_notify = User.objects.exclude(user_id=added_by.user_id)
+    # 🔥 Owner Notification — Verified
+    def notify_owner_verified(self, property_instance):
+        owner = property_instance.user_id
 
         notification = Notification.objects.create(
-            message=f"New: {property_instance.property_title}",
+            message=f"Your property '{property_instance.property_title}' has been verified.",
+            property=property_instance
+        )
+
+        notification.visible_to_users.set([owner])
+
+        UserNotificationStatus.objects.create(
+            user=owner,
+            notification=notification,
+            is_read=False
+        )
+
+    # 🔥 Agents + Clients Notification
+    def notify_agents_clients_verified(self, property_instance):
+        owner = property_instance.user_id
+
+        users_to_notify = User.objects.filter(
+            roles__role_name__in=["Agent", "Client"]
+        ).exclude(user_id=owner.user_id).distinct()
+
+        notification = Notification.objects.create(
+            message=f"New Verified Property Available: {property_instance.property_title}",
             property=property_instance
         )
 
         notification.visible_to_users.set(users_to_notify)
 
-        # Create unread status for each user
         UserNotificationStatus.objects.bulk_create([
-            UserNotificationStatus(
-                user=user, 
-                notification=notification, 
-                is_read=False
-            )
+            UserNotificationStatus(user=user, notification=notification, is_read=False)
             for user in users_to_notify
         ])
 
+    # 🔥 Owner Notification — Rejected
+    def notify_owner_rejected(self, property_instance):
+        owner = property_instance.user_id
 
+        notification = Notification.objects.create(
+            message=f"Your property '{property_instance.property_title}' was rejected.",
+            property=property_instance
+        )
 
+        notification.visible_to_users.set([owner])
 
+        UserNotificationStatus.objects.create(
+            user=owner,
+            notification=notification,
+            is_read=False
+        )
 
-
-from datetime import timedelta
-from django.utils import timezone
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-
-class LatestPropertiesAPIView(APIView):
-    """
-    GET → List latest properties (last 30 days), optionally filtered by user (paginated)
-    """
-
-    def get(self, request, user_id=None):
-        try:
-            one_month_ago = timezone.now() - timedelta(days=30)
-
-            if user_id:
-                properties = (
-                    Property.objects
-                    .filter(user_id=user_id, created_at__gte=one_month_ago)
-                    .order_by('-property_id')
-                )
-            else:
-                properties = (
-                    Property.objects
-                    .filter(created_at__gte=one_month_ago)
-                    .order_by('-property_id')
-                )
-
-            paginator = GlobalPagination()
-            paginated_properties = paginator.paginate_queryset(
-                properties,
-                request
-            )
-
-            serializer = PropertySerializer(
-                paginated_properties,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-
-
-class PropertiesByUserID(APIView):
-    """
-    GET → List properties by user ID (paginated)
-    """
-
-    def get(self, request, user_id):
-        try:
-            properties = (
-                Property.objects
-                .filter(user_id=user_id)
-                .order_by('-property_id')
-            )
-
-            paginator = GlobalPagination()
-            paginated_properties = paginator.paginate_queryset(
-                properties,
-                request
-            )
-
-            serializer = PropertySerializer(
-                paginated_properties,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-class PropertiesSoldByUserID(APIView):
-    def get(self, request, user_id):
-        try:
-            properties = Property.objects.filter(user_id=user_id,status='sold')
-            serializer = PropertySerializer(properties, many=True)  # <-- FIXED HERE
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-
-
-
-
-class PropertiesPurchasedByUserID(APIView):
-    def get(self, request, user_id):
-        try:
-            properties = Property.objects.filter(owner=user_id,status='sold')
-            serializer = PropertySerializer(properties, many=True)  # <-- FIXED HERE
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class PropertiesByApprovalStatus(APIView):
-    def get(self, request, approval_status):
-        try:
-            properties = Property.objects.filter(approval_status=approval_status)
-            response_data = []
-
-            for prop in properties:
-                # Serialize the property
-                prop_data = PropertySerializer(prop).data
-                buyer_data = None
-
-                try:
-                    # Prefer 'purchased' status first, fallback to 'booked'
-                    user_property = (
-                        prop.user_properties.filter(status='purchased').first()
-                        or prop.user_properties.filter(status='booked').first()
-                    )
-
-                    if user_property:
-                        user_info = UserSerializer(user_property.user).data
-                        buyer_data = {
-                            **user_info,
-                            "booking_date": user_property.booking_date,
-                            "purchase_date": user_property.purchase_date
-                        }
-                except UserProperty.DoesNotExist:
-                    buyer_data = None
-
-                # Add buyer_user to property data
-                prop_data["buyer_user"] = buyer_data
-                response_data.append(prop_data)
-
-            return Response(response_data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-class PropertiesByStatus(APIView):
-    def get(self, request, property_status):
-        try:
-            properties = Property.objects.filter(status=property_status)
-            response_data = []
-
-            for prop in properties:
-                # Serialize the property
-                prop_data = PropertySerializer(prop).data
-                buyer_data = None
-
-                try:
-                    # Prefer 'purchased' status first, fallback to 'booked'
-                    user_property = (
-                        prop.user_properties.filter(status='purchased').first()
-                        or prop.user_properties.filter(status='booked').first()
-                    )
-
-                    if user_property:
-                        user_info = UserSerializer(user_property.user).data
-                        buyer_data = {
-                            **user_info,
-                            "booking_date": user_property.booking_date,
-                            "purchase_date": user_property.purchase_date
-                        }
-                except UserProperty.DoesNotExist:
-                    buyer_data = None
-
-                # Add buyer_user to property data
-                prop_data["buyer_user"] = buyer_data
-                response_data.append(prop_data)
-
-            return Response(response_data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
@@ -1098,77 +764,6 @@ class PropertyStatsByUserAPIView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 
-class UniversalPropertySearchAPIView(APIView):
-    def get(self, request):
-        try:
-            query = request.query_params.get('q', '').strip()
-            looking_to = request.query_params.get('looking_to', '').strip().lower()
-
-            if not looking_to:
-                return Response({"error": "Query parameter `looking_to` is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-            filters = Q(looking_to__iexact=looking_to)
-
-            if query:
-                filters &= (
-                    Q(property_id__icontains=query) |
-                    Q(property_title__icontains=query) |
-                    Q(description__icontains=query) |
-                    Q(address__icontains=query) |
-                    Q(city__icontains=query) |
-                    Q(state__icontains=query) |
-                    Q(country__icontains=query) |
-                    Q(pin_code__icontains=query) |
-                    Q(latitude__icontains=query) |
-                    Q(longitude__icontains=query) |
-                    Q(plot_area_sqft__icontains=query) |
-                    Q(builtup_area_sqft__icontains=query) |
-                    Q(length_ft__icontains=query) |
-                    Q(breadth_ft__icontains=query) |
-                    Q(number_of_floors__icontains=query) |
-                    Q(number_of_open_sides__icontains=query) |
-                    Q(number_of_roads__icontains=query) |
-                    Q(number_of_bedrooms__icontains=query) |
-                    Q(number_of_balconies__icontains=query) |
-                    Q(number_of_bathrooms__icontains=query) |
-                    Q(road_width_1_ft__icontains=query) |
-                    Q(road_width_2_ft__icontains=query) |
-                    Q(facing__icontains=query) |
-                    Q(ownership_type__icontains=query) |
-                    Q(property_value__icontains=query) |
-                    Q(total_property_value__icontains=query) |
-                    Q(booking_amount__icontains=query) |
-                    Q(property_uniqueness__icontains=query) |
-                    Q(location_advantages__icontains=query) |
-                    Q(other_features__icontains=query) |
-                    Q(owner_name__icontains=query) |
-                    Q(owner_contact__icontains=query) |
-                    Q(owner_email__icontains=query) |
-                    Q(role__icontains=query) |
-                    Q(username__icontains=query) |
-                    Q(referral_id__icontains=query) |
-                    Q(agent_commission__icontains=query) |
-                    Q(agent_commission_paid__icontains=query) |
-                    Q(agent_commission_balance__icontains=query) |
-                    Q(company_commission__icontains=query) |
-                    Q(remaining_company_commission__icontains=query) |
-                    Q(total_company_commission_distributed__icontains=query) |
-                    Q(company_commission_status__icontains=query) |
-                    Q(status__icontains=query) |
-                    Q(approval_status__icontains=query) |
-                    Q(category__name__icontains=query) |
-                    Q(property_type__name__icontains=query) |
-                    Q(user_id__username__icontains=query) |
-                    Q(user_id__email__icontains=query) |
-                    Q(amenities__name__icontains=query)
-                )
-
-            properties = Property.objects.filter(filters).distinct()
-            serializer = PropertySerializer(properties, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ------------------ Amenity Views ------------------
@@ -1255,80 +850,6 @@ class AmenityDetailView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-#EMI 
-class EMIOptionListCreateAPIView(APIView):
-    def get(self, request):
-        options = EMIOption.objects.all()
-        serializer = EMIOptionSerializer(options, many=True)
-        return Response(serializer.data)
-
-    def post(self, request):
-        serializer = EMIOptionSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()  # emi_amount auto-calculated
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class EMIOptionDetailAPIView(APIView):
-    def get_object(self, pk):
-        return get_object_or_404(EMIOption, pk=pk)
-
-    def get(self, request, pk):
-        emi_option = self.get_object(pk)
-        serializer = EMIOptionSerializer(emi_option)
-        return Response(serializer.data)
-
-    def put(self, request, pk):
-        emi_option = self.get_object(pk)
-        serializer = EMIOptionSerializer(emi_option, data=request.data,partial=True)
-        if serializer.is_valid():
-            serializer.save()  # Recalculate emi_amount
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request, pk):
-        emi_option = self.get_object(pk)
-        emi_option.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class UserEMIListCreateAPIView(APIView):
-    def get(self, request):
-        emis = UserEMI.objects.all()
-        serializer = UserEMISerializer(emis, many=True)
-        return Response(serializer.data)
-
-    def post(self, request):
-        serializer = UserEMISerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()  # end_date auto-calculated
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class UserEMIDetailAPIView(APIView):
-    def get_object(self, pk):
-        return get_object_or_404(UserEMI, pk=pk)
-
-    def get(self, request, pk):
-        user_emi = self.get_object(pk)
-        serializer = UserEMISerializer(user_emi)
-        return Response(serializer.data)
-
-    def put(self, request, pk):
-        user_emi = self.get_object(pk)
-        serializer = UserEMISerializer(user_emi, data=request.data,partial=True)
-        if serializer.is_valid():
-            serializer.save()  # end_date recalculated
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request, pk):
-        user_emi = self.get_object(pk)
-        user_emi.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
 
 class BookingAmountSlabListCreateAPIView(APIView):
     def get(self, request):
@@ -1367,107 +888,7 @@ class BookingAmountSlabDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CommissionSummaryAPIView(APIView):
-    def get(self, request, user_id=None):
-        try:
-            if user_id:
-                properties = Property.objects.filter(user_id=user_id)
-
-                totals = properties.aggregate(
-                    total_agent_commission=Sum('agent_commission'),
-                    total_agent_commission_paid=Sum('agent_commission_paid'),
-                    total_agent_commission_balance=Sum('agent_commission_balance'),
-                    total_company_commission=Sum('company_commission'),
-                    total_company_commission_paid=Sum('total_company_commission_distributed'),
-                    total_company_commission_balance=Sum('remaining_company_commission'),
-                )
-
-                for key in totals:
-                    totals[key] = totals[key] if totals[key] is not None else 0.00
-
-                return Response({
-                    'user_id': user_id,
-                    'total_agent_commission': totals['total_agent_commission'],
-                    'total_agent_commission_paid': totals['total_agent_commission_paid'],
-                    'total_agent_commission_balance': totals['total_agent_commission_balance'],
-                    'total_company_commission': totals['total_company_commission'],
-                    'total_company_commission_paid': totals['total_company_commission_paid'],
-                    'total_company_commission_balance': totals['total_company_commission_balance'],
-                }, status=status.HTTP_200_OK)
-
-            else:
-                user_summaries = []
-                user_ids = Property.objects.values_list('user_id', flat=True).distinct()
-
-                for uid in user_ids:
-                    user_properties = Property.objects.filter(user_id=uid)
-                    totals = user_properties.aggregate(
-                        total_agent_commission=Sum('agent_commission'),
-                        total_agent_commission_paid=Sum('agent_commission_paid'),
-                        total_agent_commission_balance=Sum('agent_commission_balance'),
-                        total_company_commission=Sum('company_commission'),
-                        total_company_commission_paid=Sum('total_company_commission_distributed'),
-                        total_company_commission_balance=Sum('remaining_company_commission'),
-                    )
-
-                    for key in totals:
-                        totals[key] = totals[key] if totals[key] is not None else 0.00
-
-                    user = User.objects.filter(pk=uid).first()
-                    user_summaries.append({
-                        'user_id': uid,
-                        'user_name': user.username if user else "Unknown",
-                        'total_agent_commission': totals['total_agent_commission'],
-                        'total_agent_commission_paid': totals['total_agent_commission_paid'],
-                        'total_agent_commission_balance': totals['total_agent_commission_balance'],
-                        'total_company_commission': totals['total_company_commission'],
-                        'total_company_commission_paid': totals['total_company_commission_paid'],
-                        'total_company_commission_balance': totals['total_company_commission_balance'],
-                    })
-
-                return Response(user_summaries, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 #New
-
-class PropertiesByRoleAPIView(APIView):
-    def get(self, request, role_name):
-        try:
-            # Check if role exists
-            try:
-                role = Role.objects.get(role_name=role_name)
-            except Role.DoesNotExist:
-                return Response(
-                    {"error": f"Role '{role_name}' not found"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
-            # Get all users with this role
-            users_with_role = User.objects.filter(roles=role)
-
-            # Get properties added by those users
-            properties = Property.objects.filter(user_id__in=users_with_role)
-
-            serializer = PropertySerializer(properties, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-
-
-
-
-
-
-
 class PropertySearchAPIView(APIView):
 
     def get(self, request):

@@ -9,91 +9,12 @@ from django.db import transaction as db_transaction
 from .serializers import TransactionSerializer
 from users.models import *
 from property.models import *
-from django.db.models import Sum, Q
 from property.serializers import *
-
-
-
-
-class TransactionListCreateView(APIView):
-    def get(self, request):
-        try:
-            transactions = Transaction.objects.all().order_by("-transaction_date")
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    @db_transaction.atomic
-    def post(self, request):
-        try:
-            user_id = request.data.get("user_id")
-            property_id = request.data.get("property_id")
-            payment_type = request.data.get("payment_type")
-
-            # Validate user
-            user = User.objects.filter(user_id=user_id).first()
-            if not user:
-                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-            # Validate property
-            property_obj = Property.objects.filter(property_id=property_id).first()
-            if not property_obj:
-                return Response({"error": "Property not found"}, status=status.HTTP_404_NOT_FOUND)
-
-            # Determine booking or purchase based on payment_type
-            if payment_type == "Booking-Amount":
-                new_status = "booked"
-                date_field = "booking_date"
-            elif payment_type == "Full-Amount":
-                new_status = "purchased"
-                date_field = "purchase_date"
-            else:
-                return Response({"error": "Invalid payment_type. Allowed: Booking-Amount or Full-Amount"}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Prevent duplicate booking/purchase by same user for this property and status
-            if UserProperty.objects.filter(user=user, property=property_obj, status=new_status).exists():
-                return Response({"error": f"Property already {new_status} by this user"}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Prevent booking if property already purchased
-            if new_status == "booked" and property_obj.status == "purchased":
-                return Response({"error": "Property already purchased and cannot be booked"}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Prevent purchase if property already purchased
-            if new_status == "purchased" and property_obj.status == "purchased":
-                return Response({"error": "Property already purchased"}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Save Transaction
-            serializer = TransactionSerializer(data=request.data,context={'request': request})
-            if not serializer.is_valid():
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            transaction_instance = serializer.save()
-
-            # Create or update UserProperty
-            user_property, created = UserProperty.objects.get_or_create(
-                user=user,
-                property=property_obj,
-                defaults={ "status": new_status, date_field: timezone.now().date() }
-            )
-            if not created:
-                # Upgrade booking to purchase if applicable
-                if new_status == "purchased" and user_property.status != "purchased":
-                    user_property.status = "purchased"
-                    setattr(user_property, date_field, timezone.now().date())
-                    user_property.save()
-
-            # Update Property status if needed
-            if new_status == "purchased":
-                property_obj.status = "purchased"
-                property_obj.save()
-            elif new_status == "booked" and property_obj.status == "available":
-                property_obj.status = "booked"
-                property_obj.save()
-
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+from mlm.pagination import GlobalPagination
+from django_filters.rest_framework import DjangoFilterBackend
+from .models import Transaction
+from .filters import *
+from django.db.models import Sum, Count, Avg, Q
 
 
 class TransactionDetailView(APIView):
@@ -125,209 +46,52 @@ class TransactionDetailView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# Filter Views
 
-class TransactionByPropertyId(APIView):
-    def get(self, request, property_id):
+
+class TransactionListCreateView(APIView):
+    def get(self, request):
         try:
-            transactions = Transaction.objects.filter(property_id=property_id)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for this property"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            queryset = (
+                Transaction.objects
+                .select_related("user_id", "property_id", "order")
+                .prefetch_related("user_id__roles")
+                .order_by("-transaction_date")
+            )
+
+            filterset = TransactionFilter(request.GET, queryset=queryset)
+
+            if not filterset.is_valid():
+                return Response(
+                    filterset.errors,
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            filtered_queryset = filterset.qs.distinct()  # 🔥 IMPORTANT
+
+            paginator = GlobalPagination()
+            paginated_queryset = paginator.paginate_queryset(
+                filtered_queryset,
+                request
+            )
+
+            serializer = TransactionSerializer(
+                paginated_queryset,
+                many=True
+            )
+
+            return paginator.get_paginated_response(serializer.data)
+
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-class TransactionByUserId(APIView):
-    def get(self, request, user_id):
-        try:
-            transactions = Transaction.objects.filter(user_id=user_id)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for this user"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-class PropertyOrSubcriptionTransactionByUserId(APIView):
-    def get(self, request, user_id,transaction_for):
-        try:
-            transactions = Transaction.objects.filter(user_id=user_id,transaction_for=transaction_for)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for this user"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 
 
 
 
-class PropertyOrSubcriptionTransactions(APIView):
-    def get(self, request,transaction_for):
-        try:
-            transactions = Transaction.objects.filter(transaction_for=transaction_for)
-            if not transactions.exists():
-                return Response({"error": "No transactions found"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        
-
-class TransactionByUserIdAndPropertyId(APIView):
-    def get(self, request, user_id, property_id):
-        try:
-            transactions = Transaction.objects.filter(user_id=user_id, property_id=property_id)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for the given user and property id"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-class TransactionByUserIdAndPaymentType(APIView):
-    def get(self, request, user_id, payment_type):
-        try:
-            transactions = Transaction.objects.filter(user_id=user_id, payment_type=payment_type)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for the given user and payment type"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-class TransactionByUserIdPropertyIdAndPaymentType(APIView):
-    def get(self, request, user_id, property_id, payment_type):
-        try:
-            transactions = Transaction.objects.filter(user_id=user_id, property_id=property_id, payment_type=payment_type)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for the given user, property, and payment type"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-class TransactionByPropertyIdAndPaymentType(APIView):
-    def get(self, request, property_id, payment_type):
-        try:
-            transactions = Transaction.objects.filter(property_id=property_id, payment_type=payment_type)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for the given user, property, and payment type"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-class TransactionByPaymentType(APIView):
-    def get(self, request, payment_type):
-        try:
-            transactions = Transaction.objects.filter(payment_type=payment_type)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for the given user and payment type"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-class TransactionByUserRolePaymentType(APIView):
-    def get(self, request,role, payment_type):
-        try:
-            transactions = Transaction.objects.filter(role=role,payment_type=payment_type)
-            if not transactions.exists():
-                return Response({"error": "No transactions found for the given user and payment type"}, status=status.HTTP_404_NOT_FOUND)
-            serializer = TransactionSerializer(transactions, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-
-
-class TransactionsGroupedByPaymentTypeAPIView_old(APIView):
-    def get(self, request, user_id):
-        try:
-            user = User.objects.get(user_id=user_id)
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        # Step 1: Fetch all UserProperty records for the user
-        user_properties = UserProperty.objects.filter(user=user)
-
-        # Step 2: Separate into booked and purchased
-        booked_props = user_properties.filter(status='booked')
-        purchased_props = user_properties.filter(status='purchased')
-
-        # Step 3: Get property objects
-        booked_property_ids = booked_props.values_list('property_id', flat=True)
-        purchased_property_ids = purchased_props.values_list('property_id', flat=True)
-
-        booked_properties = Property.objects.filter(property_id__in=booked_property_ids)
-        purchased_properties = Property.objects.filter(property_id__in=purchased_property_ids)
-
-        # Step 4: Get transactions for the user
-        transactions = Transaction.objects.filter(user_id=user)
-
-        # Group transactions by type
-        booking_transactions = transactions.filter(payment_type='Booking-Amount')
-        full_transactions = transactions.filter(payment_type='Full-Amount')
-
-        # Step 5: Serialize everything
-        booking_transactions_serialized = TransactionSerializer(booking_transactions, many=True)
-        full_transactions_serialized = TransactionSerializer(full_transactions, many=True)
-        booked_properties_serialized = PropertySerializer(booked_properties, many=True)
-        purchased_properties_serialized = PropertySerializer(purchased_properties, many=True)
-
-        # Step 6: Payment breakdown per property
-        property_ids = transactions.values_list('property_id', flat=True).distinct()
-        breakdown = []
-
-        for prop_id in property_ids:
-            booking_total = transactions.filter(property_id=prop_id, payment_type='Booking-Amount').aggregate(
-                total=Sum('paid_amount'))['total'] or 0
-            full_total = transactions.filter(property_id=prop_id, payment_type='Full-Amount').aggregate(
-                total=Sum('paid_amount'))['total'] or 0
-            breakdown.append({
-                "property_id": prop_id,
-                "total_booking_amount_paid": booking_total,
-                "total_full_amount_paid": full_total,
-                "total_paid_amount": booking_total + full_total
-            })
-
-        return Response({
-            "bookings": {
-                "properties": {
-                    "count": booked_properties.count(),
-                    "list": booked_properties_serialized.data
-                },
-                "transactions": {
-                    "count": booking_transactions.count(),
-                    "list": booking_transactions_serialized.data
-                }
-            },
-            "purchased": {
-                "properties": {
-                    "count": purchased_properties.count(),
-                    "list": purchased_properties_serialized.data
-                },
-                "transactions": {
-                    "count": full_transactions.count(),
-                    "list": full_transactions_serialized.data
-                }
-            },
-            "payment_breakdown": breakdown,
-        }, status=status.HTTP_200_OK)
 
 
 
@@ -471,45 +235,36 @@ class AgentCommissionTransactionAPIView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class UserOrderListAPIView(APIView):
-    def get(self, request, user_id):
-        try:
-            orders = Order.objects.filter(user_id=user_id).order_by("-created_at")
-            serializer = OrderSerializer(orders, many=True)
-            return Response(serializer.data, status=200)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
 
-
-class OrderItemByOrderAPIView(APIView):
-    def get(self, request, order_id):
-        try:
-            items = OrderItem.objects.filter(order_id=order_id)
-            serializer = OrderItemSerializer(items, many=True)
-            return Response(serializer.data, status=200)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
 
 
 class OrderListAPIView(APIView):
     def get(self, request):
         try:
-            orders = Order.objects.all().order_by("-created_at")
-            serializer = OrderSerializer(orders, many=True)
-            return Response(serializer.data, status=200)
+            queryset = (
+                Order.objects
+                .select_related("user")
+                .order_by("-created_at")
+            )
+
+            filterset = OrderFilter(request.GET, queryset=queryset)
+
+            if not filterset.is_valid():
+                return Response(filterset.errors, status=400)
+
+            filtered_qs = filterset.qs
+
+            paginator = GlobalPagination()
+            paginated_qs = paginator.paginate_queryset(
+                filtered_qs, request
+            )
+
+            serializer = OrderSerializer(paginated_qs, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
-
-
-class OrderItemListAPIView(APIView):
-    def get(self, request):
-        try:
-            items = OrderItem.objects.select_related("order", "product")
-            serializer = OrderItemSerializer(items, many=True)
-            return Response(serializer.data, status=200)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
 
 class OrderDetailAPIView(APIView):
     def get(self, request, order_id):
@@ -519,3 +274,995 @@ class OrderDetailAPIView(APIView):
             return Response(serializer.data, status=200)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
+
+
+class OrderItemListAPIView(APIView):
+    def get(self, request):
+        try:
+            queryset = (
+                OrderItem.objects
+                .select_related("order", "variant", "property_item")
+            )
+
+            filterset = OrderItemFilter(request.GET, queryset=queryset)
+
+            if not filterset.is_valid():
+                return Response(filterset.errors, status=400)
+
+            filtered_qs = filterset.qs
+
+            paginator = GlobalPagination()
+            paginated_qs = paginator.paginate_queryset(
+                filtered_qs, request
+            )
+
+            serializer = OrderItemSerializer(paginated_qs, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+
+
+class OrderWithItemsAPIView(APIView):
+    def get(self, request):
+        try:
+            queryset = (
+                Order.objects
+                .select_related("user")
+                .prefetch_related(
+                    "items",
+                    "items__variant",
+                    "items__property_item"
+                )
+                .order_by("-created_at")
+            )
+
+            # optional user filter
+            user_id = request.GET.get("user_id")
+            if user_id:
+                queryset = queryset.filter(user__user_id=user_id)
+
+            paginator = GlobalPagination()
+            paginated_qs = paginator.paginate_queryset(queryset, request)
+
+            serializer = OrderWithItemsSerializer(paginated_qs, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+
+class UserOrderSummaryAPIView(APIView):
+    def get(self, request, user_id):
+        try:
+            orders = Order.objects.filter(user__user_id=user_id)
+
+            if not orders.exists():
+                return Response(
+                    {"message": "No orders found for this user"},
+                    status=200
+                )
+
+            summary = orders.aggregate(
+                total_orders=Count("order_id"),
+                total_spent=Sum("total_amount"),
+                average_order_value=Avg("total_amount"),
+                paid_orders=Count(
+                    "order_id",
+                    filter=models.Q(status="paid")
+                ),
+                pending_orders=Count(
+                    "order_id",
+                    filter=models.Q(status="pending")
+                ),
+                cancelled_orders=Count(
+                    "order_id",
+                    filter=models.Q(status="cancelled")
+                ),
+            )
+
+            recent_orders = orders.order_by("-created_at")[:5]
+            recent_orders_data = OrderWithItemsSerializer(
+                recent_orders, many=True
+            ).data
+
+            return Response({
+                "user_id": user_id,
+                "summary": {
+                    "total_orders": summary["total_orders"],
+                    "paid_orders": summary["paid_orders"],
+                    "pending_orders": summary["pending_orders"],
+                    "cancelled_orders": summary["cancelled_orders"],
+                    "total_spent": summary["total_spent"] or 0,
+                    "average_order_value": summary["average_order_value"] or 0,
+                },
+                "recent_orders": recent_orders_data
+            }, status=200)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+
+
+
+
+
+class OrderSummaryAPIView(APIView):
+    def get(self, request):
+        try:
+            user_id = request.GET.get("user_id")
+            role = request.GET.get("role")
+            payment_mode = request.GET.get("payment_mode")
+            start_date = request.GET.get("start_date")
+            end_date = request.GET.get("end_date")
+
+            orders = Order.objects.select_related("user").all()
+
+            # 🔹 User filter
+            if user_id:
+                orders = orders.filter(user__user_id=user_id)
+
+            # 🔹 Role-based filter (via User → Role)
+            if role:
+                orders = orders.filter(
+                    user__roles__role_name__iexact=role
+                )
+
+            # 🔹 Date-wise filter
+            if start_date:
+                orders = orders.filter(created_at__date__gte=start_date)
+            if end_date:
+                orders = orders.filter(created_at__date__lte=end_date)
+
+            orders = orders.distinct()
+
+            if not orders.exists():
+                return Response(
+                    {"message": "No orders found"},
+                    status=status.HTTP_200_OK
+                )
+
+            # 🔹 Core order summary
+            summary = orders.aggregate(
+                total_orders=Count("order_id"),
+                total_spent=Sum("total_amount"),
+                average_order_value=Avg("total_amount"),
+                paid_orders=Count(
+                    "order_id", filter=Q(status="paid")
+                ),
+                pending_orders=Count(
+                    "order_id", filter=Q(status="pending")
+                ),
+                cancelled_orders=Count(
+                    "order_id", filter=Q(status="cancelled")
+                ),
+            )
+
+            # 🔹 Payment-mode summary (from Transaction)
+            transactions = Transaction.objects.filter(
+                order__in=orders,
+                status="success"
+            )
+
+            if payment_mode:
+                transactions = transactions.filter(
+                    payment_mode__iexact=payment_mode
+                )
+
+            payment_summary = (
+                transactions
+                .values("payment_mode")
+                .annotate(
+                    total_paid=Sum("paid_amount"),
+                    transactions_count=Count("transaction_id")
+                )
+            )
+
+            # 🔹 Recent orders
+            recent_orders = (
+                orders
+                .prefetch_related("items", "items__variant", "items__property_item")
+                .order_by("-created_at")[:5]
+            )
+
+            return Response({
+                "scope": "user" if user_id else "global",
+                "filters": {
+                    "user_id": user_id,
+                    "role": role,
+                    "payment_mode": payment_mode,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                },
+                "order_summary": {
+                    "total_orders": summary["total_orders"],
+                    "paid_orders": summary["paid_orders"],
+                    "pending_orders": summary["pending_orders"],
+                    "cancelled_orders": summary["cancelled_orders"],
+                    "total_spent": summary["total_spent"] or 0,
+                    "average_order_value": summary["average_order_value"] or 0,
+                },
+                "payment_summary": list(payment_summary),
+                "recent_orders": OrderWithItemsSerializer(
+                    recent_orders, many=True
+                ).data
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from django.db.models import Count, Sum, Q
+from django.utils import timezone
+from django.utils.dateparse import parse_date
+
+from users.models import User
+from property.models import Property, UserProperty
+from transactions.models import Transaction
+from subscription.models import Subscription
+
+
+class AdminSummaryAPIView_new1(APIView):
+
+    def get(self, request):
+
+        user_id = request.GET.get("user_id")
+        role = request.GET.get("role")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        # =============================
+        # BASE QUERYSETS
+        # =============================
+        users = User.objects.all()
+        properties = Property.objects.all()
+        user_properties = UserProperty.objects.all()
+        transactions = Transaction.objects.all()
+        subscriptions = Subscription.objects.all()
+
+        # =============================
+        # DATE FILTER (Transactions)
+        # =============================
+        if start_date and end_date:
+            transactions = transactions.filter(
+                transaction_date__date__range=[
+                    parse_date(start_date),
+                    parse_date(end_date)
+                ]
+            )
+
+        # =============================
+        # USER FILTER
+        # =============================
+        if user_id:
+            users = users.filter(user_id=user_id)
+            properties = properties.filter(user_id=user_id)
+            user_properties = user_properties.filter(user_id=user_id)
+            transactions = transactions.filter(user_id=user_id)
+            subscriptions = subscriptions.filter(user_id=user_id)
+
+        # =============================
+        # ROLE FILTER
+        # =============================
+        if role:
+            users = users.filter(roles__role_name__iexact=role)
+            properties = properties.filter(role__iexact=role)
+            transactions = transactions.filter(role__iexact=role)
+
+        # ======================================================
+        # 🟦 SELLER SIDE → PROPERTIES ADDED BY USER
+        # ======================================================
+        seller_property_summary = {
+            "total_added": properties.count(),
+            "available": properties.filter(status="available").count(),
+            "booked": properties.filter(status="booked").count(),
+            "sold": properties.filter(status="sold").count(),
+            "pending_verification": properties.filter(verification_status="pending").count(),
+            "verified": properties.filter(verification_status="verified").count(),
+        }
+
+        # ======================================================
+        # 🟩 BUYER SIDE → PROPERTIES BOOKED / PURCHASED BY USER
+        # ======================================================
+        buyer_property_summary = {
+            "booked": user_properties.filter(status="booked").count(),
+            "purchased": user_properties.filter(status="purchased").count(),
+        }
+
+        # ======================================================
+        # 👤 USER SUMMARY
+        # ======================================================
+        user_summary = {
+            "total_users": users.count(),
+            "active": users.filter(status="active").count(),
+            "inactive": users.filter(status="inactive").count(),
+            "role_wise": users.values("roles__role_name")
+                .annotate(count=Count("user_id"))
+        }
+
+        # ======================================================
+        # 🏠 ROLE → PROPERTY CONTRIBUTION
+        # ======================================================
+        role_property_summary = Property.objects.values("role").annotate(
+            total=Count("property_id"),
+            verified=Count("property_id", filter=Q(verification_status="verified")),
+            pending=Count("property_id", filter=Q(verification_status="pending")),
+            sold=Count("property_id", filter=Q(status="sold")),
+        )
+
+        # ======================================================
+        # 💳 TRANSACTION SUMMARY
+        # ======================================================
+        transaction_summary = {
+            "total_transactions": transactions.count(),
+            "success": transactions.filter(status="success").count(),
+            "failed": transactions.filter(status="failed").count(),
+            "refunded": transactions.filter(status="refunded").count(),
+
+            "total_revenue": transactions.filter(status="success")
+                .aggregate(amount=Sum("paid_amount"))["amount"] or 0,
+
+            "by_type": transactions.values("transaction_for")
+                .annotate(count=Count("transaction_id"), amount=Sum("paid_amount")),
+
+            "by_payment_mode": transactions.values("payment_mode")
+                .annotate(count=Count("transaction_id"), amount=Sum("paid_amount")),
+        }
+
+        # ======================================================
+        # 📦 SUBSCRIPTION SUMMARY
+        # ======================================================
+        now = timezone.now()
+
+        subscription_summary = {
+            "total_subscriptions": subscriptions.count(),
+            "active": subscriptions.filter(
+                subscription_end_datetime__gte=now
+            ).count(),
+            "expired": subscriptions.filter(
+                subscription_end_datetime__lt=now
+            ).count(),
+            "subscription_revenue": Transaction.objects.filter(
+                transaction_for="subscription",
+                status="success"
+            ).aggregate(amount=Sum("paid_amount"))["amount"] or 0
+        }
+
+        # ======================================================
+        # FINAL RESPONSE
+        # ======================================================
+        return Response({
+            "filters_applied": {
+                "user_id": user_id,
+                "role": role,
+                "start_date": start_date,
+                "end_date": end_date
+            },
+            "seller_properties": seller_property_summary,
+            "buyer_properties": buyer_property_summary,
+            "user_summary": user_summary,
+            "role_property_summary": role_property_summary,
+            "transaction_summary": transaction_summary,
+            "subscription_summary": subscription_summary
+        })
+
+class AdminSummaryAPIView_new2(APIView):
+
+    def get(self, request):
+
+        user_id = request.GET.get("user_id")
+        role = request.GET.get("role")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        # =============================
+        # BASE QUERYSETS
+        # =============================
+        users = User.objects.all()
+        properties = Property.objects.all()
+        user_properties = UserProperty.objects.all()
+        transactions = Transaction.objects.all()
+        subscriptions = Subscription.objects.all()
+
+        # =============================
+        # DATE FILTERS
+        # =============================
+        if start_date and end_date:
+            date_range = [
+                parse_date(start_date),
+                parse_date(end_date)
+            ]
+            transactions = transactions.filter(transaction_date__date__range=date_range)
+            subscriptions = subscriptions.filter(
+                subscription_start_datetime__date__range=date_range
+            )
+
+        # =============================
+        # USER FILTER
+        # =============================
+        if user_id:
+            users = users.filter(user_id=user_id)
+            properties = properties.filter(user_id=user_id)
+            user_properties = user_properties.filter(user_id=user_id)
+            transactions = transactions.filter(user_id=user_id)
+            subscriptions = subscriptions.filter(user_id=user_id)
+
+        # =============================
+        # ROLE FILTER (ADMIN USE)
+        # =============================
+        if role and not user_id:
+            users = users.filter(roles__role_name__iexact=role)
+            properties = properties.filter(role__iexact=role)
+            transactions = transactions.filter(role__iexact=role)
+
+        # =====================================================
+        # 👤 USER SUMMARY
+        # =====================================================
+        user_summary = {
+            "total_users": users.count(),
+            "active": users.filter(status="active").count(),
+            "inactive": users.filter(status="inactive").count(),
+        }
+
+        if not user_id:
+            role_user_stats = []
+            for r in users.values_list("roles__role_name", flat=True).distinct():
+                qs = users.filter(roles__role_name=r)
+                role_user_stats.append({
+                    "role": r,
+                    "count": qs.count(),
+                    "active": qs.filter(status="active").count(),
+                    "inactive": qs.filter(status="inactive").count(),
+                })
+            user_summary["role_wise"] = role_user_stats
+
+        # =====================================================
+        # 🏠 PROPERTY SUMMARY
+        # =====================================================
+        property_summary = {
+            "total_properties": properties.count(),
+            "pending": properties.filter(verification_status="pending").count(),
+            "verified": properties.filter(verification_status="verified").count(),
+            "available": properties.filter(status="available").count(),
+            "booked": properties.filter(status="booked").count(),
+            "sold": properties.filter(status="sold").count(),
+            "rejected": properties.filter(verification_status="rejected").count(),
+        }
+
+        if not user_id:
+            role_property_stats = []
+            for r in properties.values_list("role", flat=True).distinct():
+                qs = properties.filter(role=r)
+                role_property_stats.append({
+                    "role": r,
+                    "total_properties": qs.count(),
+                    "verified": qs.filter(verification_status="verified").count(),
+                    "pending": qs.filter(verification_status="pending").count(),
+                    "sold": qs.filter(status="sold").count(),
+                })
+            property_summary["role_wise"] = role_property_stats
+
+        # =====================================================
+        # 💳 TRANSACTION SUMMARY
+        # =====================================================
+        transaction_summary = {
+            "total_transactions": transactions.count(),
+            "success": transactions.filter(status="success").count(),
+            "failed": transactions.filter(status="failed").count(),
+            "refunded": transactions.filter(status="refunded").count(),
+            "total_revenue": transactions.filter(status="success")
+                .aggregate(amount=Sum("paid_amount"))["amount"] or 0,
+        }
+
+        if not user_id:
+            transaction_summary["role_wise"] = list(
+                transactions.values("role")
+                .annotate(
+                    count=Count("transaction_id"),
+                    amount=Sum("paid_amount")
+                )
+            )
+
+        # =====================================================
+        # 📦 SUBSCRIPTION SUMMARY
+        # =====================================================
+        now = timezone.now()
+
+        subscription_summary = {
+            "total_subscriptions": subscriptions.count(),
+            "active": subscriptions.filter(subscription_end_datetime__gte=now).count(),
+            "expired": subscriptions.filter(subscription_end_datetime__lt=now).count(),
+            "subscription_revenue": transactions.filter(
+                transaction_for="subscription",
+                status="success"
+            ).aggregate(amount=Sum("paid_amount"))["amount"] or 0,
+        }
+
+        if not user_id:
+            subscription_summary["role_wise"] = list(
+                subscriptions.values("user_id__roles__role_name")
+                .annotate(count=Count("subscription_id"))
+            )
+
+        # =====================================================
+        # FINAL RESPONSE
+        # =====================================================
+        return Response({
+            "filters_applied": {
+                "user_id": user_id,
+                "role": role,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+            "user_summary": user_summary,
+            "property_summary": property_summary,
+            "transaction_summary": transaction_summary,
+            "subscription_summary": subscription_summary,
+        })
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from django.db.models import Count, Sum, Q
+from django.utils.dateparse import parse_date
+from django.utils import timezone
+
+from users.models import User
+from property.models import Property, UserProperty
+from transactions.models import Transaction
+from subscription.models import Subscription
+
+
+class AdminSummaryAPIView_new3(APIView):
+
+    def get(self, request):
+
+        user_id = request.GET.get("user_id")
+        role = request.GET.get("role")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        # =============================
+        # BASE QUERYSETS
+        # =============================
+        users = User.objects.all()
+        properties = Property.objects.all()
+        transactions = Transaction.objects.all()
+        subscriptions = Subscription.objects.all()
+
+        # =============================
+        # DATE FILTERS
+        # =============================
+        if start_date and end_date:
+            date_range = [parse_date(start_date), parse_date(end_date)]
+            transactions = transactions.filter(transaction_date__date__range=date_range)
+            subscriptions = subscriptions.filter(
+                subscription_start_datetime__date__range=date_range
+            )
+
+        # =============================
+        # USER FILTER
+        # =============================
+        if user_id:
+            users = users.filter(user_id=user_id)
+            properties = properties.filter(user_id=user_id)
+            transactions = transactions.filter(user_id=user_id)
+            subscriptions = subscriptions.filter(user_id=user_id)
+
+        # =============================
+        # ROLE FILTER (ADMIN ONLY)
+        # =============================
+        if role and not user_id:
+            users = users.filter(roles__role_name__iexact=role)
+            properties = properties.filter(user_id__roles__role_name__iexact=role)
+            transactions = transactions.filter(user_id__roles__role_name__iexact=role)
+            subscriptions = subscriptions.filter(user_id__roles__role_name__iexact=role)
+
+        # =====================================================
+        # 👤 USER SUMMARY (ADMIN ONLY)
+        # =====================================================
+        if not user_id:
+            user_summary = {
+                "total_users": users.count(),
+                "active": users.filter(status="active").count(),
+                "inactive": users.filter(status="inactive").count(),
+                "role_wise": []
+            }
+
+            role_user_qs = (
+                users.values("roles__role_name")
+                .annotate(
+                    count=Count("user_id"),
+                    active=Count("user_id", filter=Q(status="active")),
+                    inactive=Count("user_id", filter=Q(status="inactive")),
+                )
+            )
+
+            for row in role_user_qs:
+                if row["roles__role_name"]:
+                    user_summary["role_wise"].append({
+                        "role": row["roles__role_name"],
+                        "count": row["count"],
+                        "active": row["active"],
+                        "inactive": row["inactive"],
+                    })
+
+        # =====================================================
+        # 🏠 PROPERTY SUMMARY
+        # =====================================================
+        property_summary = {
+            "total_properties": properties.count(),
+            "pending": properties.filter(verification_status="pending").count(),
+            "verified": properties.filter(verification_status="verified").count(),
+            "available": properties.filter(status="available").count(),
+            "booked": properties.filter(status="booked").count(),
+            "sold": properties.filter(status="sold").count(),
+            "rejected": properties.filter(verification_status="rejected").count(),
+        }
+
+        if not user_id:
+            property_summary["role_wise"] = []
+
+            role_property_qs = (
+                Property.objects
+                .values("user_id__roles__role_name")
+                .annotate(
+                    total_properties=Count("property_id"),
+                    verified=Count("property_id", filter=Q(verification_status="verified")),
+                    pending=Count("property_id", filter=Q(verification_status="pending")),
+                    sold=Count("property_id", filter=Q(status="sold")),
+                )
+            )
+
+            for row in role_property_qs:
+                if row["user_id__roles__role_name"]:
+                    property_summary["role_wise"].append({
+                        "role": row["user_id__roles__role_name"],
+                        "total_properties": row["total_properties"],
+                        "verified": row["verified"],
+                        "pending": row["pending"],
+                        "sold": row["sold"],
+                    })
+
+        # =====================================================
+        # 💳 TRANSACTION SUMMARY
+        # =====================================================
+        transaction_summary = {
+            "total_transactions": transactions.count(),
+            "success": transactions.filter(status="success").count(),
+            "failed": transactions.filter(status="failed").count(),
+            "refunded": transactions.filter(status="refunded").count(),
+            "total_revenue": transactions.filter(status="success")
+                .aggregate(amount=Sum("paid_amount"))["amount"] or 0,
+        }
+
+        if not user_id:
+            transaction_summary["role_wise"] = []
+
+            role_transaction_qs = (
+                Transaction.objects
+                .filter(status="success")
+                .values("user_id__roles__role_name")
+                .annotate(
+                    count=Count("transaction_id"),
+                    amount=Sum("paid_amount")
+                )
+            )
+
+            for row in role_transaction_qs:
+                if row["user_id__roles__role_name"]:
+                    transaction_summary["role_wise"].append({
+                        "role": row["user_id__roles__role_name"],
+                        "count": row["count"],
+                        "amount": row["amount"] or 0,
+                    })
+
+        # =====================================================
+        # 📦 SUBSCRIPTION SUMMARY
+        # =====================================================
+        now = timezone.now()
+
+        subscription_summary = {
+            "total_subscriptions": subscriptions.count(),
+            "active": subscriptions.filter(subscription_end_datetime__gte=now).count(),
+            "expired": subscriptions.filter(subscription_end_datetime__lt=now).count(),
+            "subscription_revenue": Transaction.objects.filter(
+                transaction_for="subscription",
+                status="success"
+            ).aggregate(amount=Sum("paid_amount"))["amount"] or 0,
+        }
+
+        if not user_id:
+            subscription_summary["role_wise"] = []
+
+            role_subscription_qs = (
+                Subscription.objects
+                .values("user_id__roles__role_name")
+                .annotate(count=Count("subscription_id"))
+            )
+
+            for row in role_subscription_qs:
+                if row["user_id__roles__role_name"]:
+                    subscription_summary["role_wise"].append({
+                        "role": row["user_id__roles__role_name"],
+                        "count": row["count"]
+                    })
+
+        # =====================================================
+        # FINAL RESPONSE
+        # =====================================================
+        response = {
+            "filters_applied": {
+                "user_id": user_id,
+                "role": role,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+            "property_summary": property_summary,
+            "transaction_summary": transaction_summary,
+            "subscription_summary": subscription_summary,
+        }
+
+        if not user_id:
+            response["user_summary"] = user_summary
+
+        return Response(response)
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from django.db.models import Count, Sum, Q
+from django.utils.dateparse import parse_date
+from django.utils import timezone
+
+from users.models import User
+from property.models import Property, UserProperty
+from transactions.models import Transaction
+from subscription.models import Subscription
+
+
+class AdminSummaryAPIView(APIView):
+
+    def get(self, request):
+
+        user_id = request.GET.get("user_id")
+        role = request.GET.get("role")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        # =============================
+        # BASE QUERYSETS
+        # =============================
+        users = User.objects.all()
+        properties = Property.objects.all()
+        transactions = Transaction.objects.all()
+        subscriptions = Subscription.objects.all()
+
+        # =============================
+        # DATE FILTERS
+        # =============================
+        if start_date and end_date:
+            date_range = [parse_date(start_date), parse_date(end_date)]
+            transactions = transactions.filter(transaction_date__date__range=date_range)
+            subscriptions = subscriptions.filter(
+                subscription_start_datetime__date__range=date_range
+            )
+
+        # =============================
+        # USER FILTER
+        # =============================
+        if user_id:
+            users = users.filter(user_id=user_id)
+            properties = properties.filter(user_id=user_id)
+            transactions = transactions.filter(user_id=user_id)
+            subscriptions = subscriptions.filter(user_id=user_id)
+
+        # =============================
+        # ROLE FILTER (ADMIN ONLY)
+        # =============================
+        if role and not user_id:
+            users = users.filter(roles__role_name__iexact=role)
+            properties = properties.filter(user_id__roles__role_name__iexact=role)
+            transactions = transactions.filter(user_id__roles__role_name__iexact=role)
+            subscriptions = subscriptions.filter(user_id__roles__role_name__iexact=role)
+
+        # =====================================================
+        # 👤 USER SUMMARY (ADMIN ONLY)
+        # =====================================================
+        if not user_id:
+            user_summary = {
+                "total_users": users.count(),
+                "active": users.filter(status="active").count(),
+                "inactive": users.filter(status="inactive").count(),
+                "role_wise": []
+            }
+
+            role_user_qs = (
+                users.values("roles__role_name")
+                .annotate(
+                    count=Count("user_id"),
+                    active=Count("user_id", filter=Q(status="active")),
+                    inactive=Count("user_id", filter=Q(status="inactive")),
+                )
+            )
+
+            for row in role_user_qs:
+                if row["roles__role_name"]:
+                    user_summary["role_wise"].append({
+                        "role": row["roles__role_name"],
+                        "count": row["count"],
+                        "active": row["active"],
+                        "inactive": row["inactive"],
+                    })
+
+        # =====================================================
+        # 🏠 PROPERTY SUMMARY
+        # =====================================================
+        if user_id:
+            # -------- SELLER VIEW (Added by user) --------
+            added_properties = Property.objects.filter(user_id=user_id)
+
+            # seller_summary = {
+            #     "total_added": added_properties.count(),
+            #     "available": added_properties.filter(status="available").count(),
+            #     "booked": added_properties.filter(status="booked").count(),
+            #     "sold": added_properties.filter(status="sold").count(),
+            # }
+
+            seller_summary = {
+                "total_added": added_properties.count(),
+
+                # Status-wise (business flow)
+                "available": added_properties.filter(status="available").count(),
+                "booked": added_properties.filter(status="booked").count(),
+                "sold": added_properties.filter(status="sold").count(),
+
+                # Verification-wise (admin flow)
+                "pending": added_properties.filter(verification_status="pending").count(),
+                "verified": added_properties.filter(verification_status="verified").count(),
+                "rejected": added_properties.filter(verification_status="rejected").count(),
+            }
+
+
+            # -------- BUYER VIEW (Booked / Purchased by user) --------
+            user_properties = UserProperty.objects.filter(user_id=user_id)
+
+            buyer_summary = {
+                "booked": user_properties.filter(status="booked").count(),
+                "purchased": user_properties.filter(status="purchased").count(),
+            }
+
+            property_summary = {
+                "seller": seller_summary,
+                "buyer": buyer_summary
+            }
+
+        else:
+            # -------- ADMIN GLOBAL VIEW --------
+            property_summary = {
+                "total_properties": properties.count(),
+                "pending": properties.filter(verification_status="pending").count(),
+                "verified": properties.filter(verification_status="verified").count(),
+                "available": properties.filter(status="available").count(),
+                "booked": properties.filter(status="booked").count(),
+                "sold": properties.filter(status="sold").count(),
+                "rejected": properties.filter(verification_status="rejected").count(),
+                "role_wise": []
+            }
+
+            role_property_qs = (
+                Property.objects
+                .values("user_id__roles__role_name")
+                .annotate(
+                    total_properties=Count("property_id"),
+                    verified=Count("property_id", filter=Q(verification_status="verified")),
+                    pending=Count("property_id", filter=Q(verification_status="pending")),
+                    sold=Count("property_id", filter=Q(status="sold")),
+                )
+            )
+
+            for row in role_property_qs:
+                if row["user_id__roles__role_name"]:
+                    property_summary["role_wise"].append({
+                        "role": row["user_id__roles__role_name"],
+                        "total_properties": row["total_properties"],
+                        "verified": row["verified"],
+                        "pending": row["pending"],
+                        "sold": row["sold"],
+                    })
+
+        # =====================================================
+        # 💳 TRANSACTION SUMMARY
+        # =====================================================
+        transaction_summary = {
+            "total_transactions": transactions.count(),
+            "success": transactions.filter(status="success").count(),
+            "failed": transactions.filter(status="failed").count(),
+            "refunded": transactions.filter(status="refunded").count(),
+            "total_revenue": transactions.filter(status="success")
+                .aggregate(amount=Sum("paid_amount"))["amount"] or 0,
+        }
+
+        if not user_id:
+            transaction_summary["role_wise"] = []
+
+            role_transaction_qs = (
+                Transaction.objects
+                .filter(status="success")
+                .values("user_id__roles__role_name")
+                .annotate(
+                    count=Count("transaction_id"),
+                    amount=Sum("paid_amount")
+                )
+            )
+
+            for row in role_transaction_qs:
+                if row["user_id__roles__role_name"]:
+                    transaction_summary["role_wise"].append({
+                        "role": row["user_id__roles__role_name"],
+                        "count": row["count"],
+                        "amount": row["amount"] or 0,
+                    })
+
+        # =====================================================
+        # 📦 SUBSCRIPTION SUMMARY
+        # =====================================================
+        now = timezone.now()
+
+        subscription_summary = {
+            "total_subscriptions": subscriptions.count(),
+            "active": subscriptions.filter(subscription_end_datetime__gte=now).count(),
+            "expired": subscriptions.filter(subscription_end_datetime__lt=now).count(),
+            "subscription_revenue": Transaction.objects.filter(
+                transaction_for="subscription",
+                status="success"
+            ).aggregate(amount=Sum("paid_amount"))["amount"] or 0,
+        }
+
+        if not user_id:
+            subscription_summary["role_wise"] = []
+
+            role_subscription_qs = (
+                Subscription.objects
+                .values("user_id__roles__role_name")
+                .annotate(count=Count("subscription_id"))
+            )
+
+            for row in role_subscription_qs:
+                if row["user_id__roles__role_name"]:
+                    subscription_summary["role_wise"].append({
+                        "role": row["user_id__roles__role_name"],
+                        "count": row["count"]
+                    })
+
+        # =====================================================
+        # FINAL RESPONSE
+        # =====================================================
+        response = {
+            "filters_applied": {
+                "user_id": user_id,
+                "role": role,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+            "property_summary": property_summary,
+            "transaction_summary": transaction_summary,
+            "subscription_summary": subscription_summary,
+        }
+
+        if not user_id:
+            response["user_summary"] = user_summary
+
+        return Response(response)

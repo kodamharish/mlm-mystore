@@ -1,8 +1,8 @@
 from django.db import models
 #from users.models import *
+from django.db import models
 from django.utils import timezone
 from datetime import timedelta
-
 
 
 # Create your models here.
@@ -27,7 +27,7 @@ class SubscriptionPlan(models.Model):
 
 class SubscriptionPlanVariant(models.Model):
     variant_id = models.AutoField(primary_key=True)
-    #plan_id = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='variants')
+    
     plan_id = models.ForeignKey(
         "subscription.SubscriptionPlan",   # ✅ STRING
         on_delete=models.CASCADE,
@@ -46,32 +46,10 @@ class SubscriptionPlanVariant(models.Model):
         return f"{self.plan_id.plan_name} - {self.duration_in_days} days"
 
 
-# class Subscription(models.Model):
-#     subscription_id = models.AutoField(primary_key=True)
-#     # user_id = models.ForeignKey(User, on_delete=models.CASCADE)
-#     user_id = models.ForeignKey("users.User", on_delete=models.CASCADE,related_name="user_subscriptions")
-#     #subscription_variant = models.ForeignKey(SubscriptionPlanVariant, on_delete=models.CASCADE)
-#     subscription_variant = models.ForeignKey(
-#         "subscriptions.SubscriptionPlanVariant",   # ✅ STRING
-#         on_delete=models.CASCADE,related_name="subscription_variants"
-#     )
-#     subscription_status = models.CharField(max_length=40, null=True, blank=True)
-#     subscription_start_date = models.DateField(auto_now_add=True)
-#     subscription_end_date = models.DateField()
-#     def save(self, *args, **kwargs):
-#         if self._state.adding:
-#             self.subscription_start_date = timezone.now().date()
-#             if self.subscription_variant:
-#                 self.subscription_end_date = self.subscription_start_date + timedelta(days=self.subscription_variant.duration_in_days)
-#         super().save(*args, **kwargs)
-
-#     def __str__(self):
-#         return f"{self.subscription_id} - {self.user_id.email}"
 
 
-from django.db import models
-from django.utils import timezone
-from datetime import timedelta
+
+
 
 
 SUBSCRIPTION_STATUS_CHOICES = (

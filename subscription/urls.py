@@ -3,8 +3,6 @@ from .views import *
 
 
 
-
-
 urlpatterns = [
     
     # Plans

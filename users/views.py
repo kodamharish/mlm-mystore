@@ -10,7 +10,6 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
 from property.models import  *
-import random
 from django.core.mail import send_mail
 from django.utils.cache import caches
 from mlm.settings import *
@@ -22,6 +21,13 @@ from urllib.parse import quote  # ✅ for URL encoding
 from django.core.cache import cache
 from django.conf import settings
 from mlm.pagination import GlobalPagination
+from django.db import transaction, IntegrityError
+from django.db.models import Max, IntegerField
+from django.db.models.functions import Cast, Substr
+from .filters import *
+from business.models import * 
+
+
 
 
 
@@ -30,85 +36,8 @@ from mlm.pagination import GlobalPagination
 cache = caches['default']
 
 
-class LoginAPIView_old(APIView):
-    def post(self, request):
-        email = request.data.get("email")
-        password = request.data.get("password")
 
-        try:
-            user = User.objects.get(email=email)
-            print(user)
-            if check_password(password, user.password):
-                # Fetch the user's roles
-                roles = user.roles.values_list('role_name', flat=True)  # Get role names as a list
-                
-                return Response(
-                    {
-                        "message": "Login successful",
-                        "user_id": user.user_id,
-                        "referral_id":user.referral_id,
-                        "referred_by": user.referred_by,
-                        "first_name":user.first_name,
-                        "last_name": user.last_name,
-                        "email": user.email,
-                        "phone_number": user.phone_number,
-                        "roles": list(roles),  # Convert QuerySet to list
-                    },
-                    status=status.HTTP_200_OK
-                )
-            else:
-                return Response({"error": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-#Login With Email or Phonenumber
-
-class LoginAPIView_new1(APIView):
-    def post(self, request):
-        email_or_phone = request.data.get("email_or_phonenumber")
-        password = request.data.get("password")
-
-        if not email_or_phone or not password:
-            return Response(
-                {"error": "Email/Phone and password are required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            # Determine whether input is email or phone
-            if "@" in email_or_phone:
-                user = User.objects.get(email=email_or_phone)   # Login using email
-            else:
-                user = User.objects.get(phone_number=email_or_phone)  # Login using phone
-
-            # Validate password
-            if check_password(password, user.password):
-
-                roles = user.roles.values_list('role_name', flat=True)
-
-                return Response(
-                    {
-                        "message": "Login successful",
-                        "user_id": user.user_id,
-                        "referral_id": user.referral_id,
-                        "referred_by": user.referred_by,
-                        "first_name": user.first_name,
-                        "last_name": user.last_name,
-                        "email": user.email,
-                        "phone_number": user.phone_number,
-                        "roles": list(roles),
-                    },
-                    status=status.HTTP_200_OK
-                )
-
-            else:
-                return Response({"error": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
-
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-
-
+#Login With Email or Phonenumber or Referral ID
 
 class LoginAPIView(APIView):
     def post(self, request):
@@ -340,19 +269,6 @@ class RoleDetailView(APIView):
 
 
 
-
-
-
-
-
-from django.db import transaction, IntegrityError
-from django.db.models import Max, IntegerField
-from django.db.models.functions import Cast, Substr
-
-
-
-
-
 class UserListCreateView(APIView):
 
     def get(self, request):
@@ -479,61 +395,10 @@ class UserDetailView(APIView):
     
 
 
-class UsersByRoleAPIView(APIView):
-    def get(self, request, role_name):
-        try:
-            role = Role.objects.get(role_name=role_name)
-            users = User.objects.filter(roles=role).distinct()
-            serializer = UserSerializer(users, many=True)
-            return Response(serializer.data, status=200)
-        except Role.DoesNotExist:
-            return Response({"error": f"Role '{role_name}' not found"}, status=404)
-
-
-
-class UsersByStatus(APIView):
-    def get(self, request, user_status):
-        try:
-            users = User.objects.filter(status=user_status)
-            serializer = UserSerializer(users, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-
-
-class AgentsByReferralIdAPIView(APIView):
-    def get(self, request, referral_id):
-        try:
-            users = User.objects.filter(referred_by=referral_id).order_by('created_at')
-            active_users = users.filter(status__iexact='Active')
-            inactive_users = users.filter(status__iexact='Inactive')
-
-            users_serializer = UserSerializer(users, many=True)
-            active_serializer = UserSerializer(active_users, many=True)
-            inactive_serializer = UserSerializer(inactive_users, many=True)
-
-            return Response({
-                "total_agents": users.count(),
-                "total_active_agents": active_users.count(),
-                "total_inactive_agents": inactive_users.count(),
-                "agents": users_serializer.data,
-                "active_agents": active_serializer.data,
-                "inactive_agents": inactive_serializer.data
-            }, status=200)
-        except User.DoesNotExist:
-            return Response({"error": f"Users with referral ID '{referral_id}' not found"}, status=404)
 
 
 
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from .models import User
-from .serializers import UserSerializer
-from .filters import UserFilter
-from mlm.pagination import GlobalPagination
 
 
 class UserSearchAPIView(APIView):
@@ -832,175 +697,10 @@ class DepartmentDetailView(APIView):
 
 
 
-#Meetings
-# class MeetingListCreateView(APIView):
-#     def get(self, request):
-#         try:
-#             meetings = Meeting.objects.all().order_by('-scheduled_date')
-#             serializer = MeetingSerializer(meetings, many=True)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def post(self, request):
-#         try:
-#             serializer = MeetingSerializer(data=request.data)
-#             if serializer.is_valid():
-#                 meeting = serializer.save()
-
-#                 # Extract users for email
-#                 recipients = meeting.users.all()
-
-
-#                 # Format date as DD-MM-YYYY
-#                 formatted_date = meeting.scheduled_date.strftime("%d-%m-%Y")
-
-#                 # Send email to all users
-#                 subject = f"Meeting Scheduled: {meeting.title}"
-#                 message = (
-#                     f"Dear Participant,\n\n"
-#                     f"You have been added to a new meeting.\n\n"
-#                     f"Title: {meeting.title}\n"
-#                     f"Date: {formatted_date}\n"
-#                     f"Time: {meeting.scheduled_time}\n"
-#                     f"Meeting Link: {meeting.meeting_link}\n\n"
-#                     f"Notes: {meeting.notes}\n\n"
-#                     f"Thank you!"
-#                 )
-
-#                 for user in recipients:
-#                     if user.email:
-#                         send_mail(
-#                             subject,
-#                             message,
-#                             settings.EMAIL_HOST_USER,
-#                             [user.email],
-#                             fail_silently=False,
-#                         )
-
-#                 return Response({"message": "Meeting created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
-
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#         except Exception as e:
-#             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-# class MeetingDetailView(APIView):
-
-#     def get(self, request, meeting_id):
-#         try:
-#             meeting = get_object_or_404(Meeting, meeting_id=meeting_id)
-#             serializer = MeetingSerializer(meeting)
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-#         except Exception as e:
-#             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-#     def put(self, request, meeting_id):
-#         try:
-#             meeting = get_object_or_404(Meeting, meeting_id=meeting_id)
-#             old_status = meeting.status
-
-#             serializer = MeetingSerializer(meeting, data=request.data, partial=True)
-#             if serializer.is_valid():
-#                 updated_meeting = serializer.save()
-
-#                 new_status = updated_meeting.status
-#                 # Format date as DD-MM-YYYY
-#                 formatted_date = updated_meeting.scheduled_date.strftime("%d-%m-%Y")
-
-#                 # Send email only if status changed
-#                 if old_status != new_status and new_status in ["completed", "cancelled"]:
-#                     recipients = updated_meeting.users.all()
-
-#                     subject = f"Meeting {new_status.capitalize()}"
-#                     message = (
-#                         f"Your meeting has been {new_status}.\n\n"
-#                         f"Title: {updated_meeting.title}\n"
-#                         f"Date: {formatted_date}\n"
-#                         f"Time: {updated_meeting.scheduled_time}\n"
-#                         f"Link: {updated_meeting.meeting_link or 'N/A'}\n\n"
-#                         f"Notes: {updated_meeting.notes}\n"
-#                     )
-
-#                     for user in recipients:
-#                         if user.email:
-#                             send_mail(
-#                                 subject,
-#                                 message,
-#                                 settings.EMAIL_HOST_USER,
-#                                 [user.email],
-#                                 fail_silently=False,
-#                             )
-
-#                 return Response(serializer.data, status=status.HTTP_200_OK)
-
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#         except Exception as e:
-#             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-#     def delete(self, request, meeting_id):
-#         try:
-#             meeting = get_object_or_404(Meeting, meeting_id=meeting_id)
-#             meeting.delete()
-#             return Response({"message": "Meeting deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-#         except Exception as e:
-#             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 
 
 # Meeting Requests
-
-class MeetingRequestListCreateView_old(APIView):
-
-    def get(self, request):
-        try:
-            requests = MeetingRequest.objects.all().order_by('-request_id')
-
-            paginator = GlobalPagination()
-            paginated_requests = paginator.paginate_queryset(
-                requests,
-                request
-            )
-
-            serializer = MeetingRequestSerializer(
-                paginated_requests,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    def post(self, request):
-        try:
-            serializer = MeetingRequestSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {
-                        "message": "Meeting request created successfully",
-                        "data": serializer.data
-                    },
-                    status=status.HTTP_201_CREATED
-                )
-
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
 
 
@@ -1253,9 +953,7 @@ class ScheduledMeetingDetailView(APIView):
     
 
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
+
 
 class MeetingRequestsByUserIdAPIView(APIView):
     """
@@ -1775,8 +1473,6 @@ class LikeDetailView(APIView):
 
 
 
-from django.core.mail import send_mail
-from django.conf import settings
 
 def get_bot_response(message, is_other=False):
     message = message.lower().strip()
@@ -1958,11 +1654,6 @@ class ChatKeywordListCreateAPIView(APIView):
 # -------------------------------
 
 
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-
 class SiteVisitListCreateView(APIView):
     """
     GET  → List all site visits (paginated)
@@ -2090,22 +1781,6 @@ class SiteVisitsByUserView(APIView):
 
 
 
-
-
-class ReferralPrefixListCreateView_old(APIView):
-    def get(self, request):
-        prefixes = ReferralPrefix.objects.all().order_by('-created_at')
-        serializer = ReferralPrefixSerializer(prefixes, many=True)
-        return Response(serializer.data)
-
-    def post(self, request):
-        serializer = ReferralPrefixSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=201)
-        return Response(serializer.errors, status=400)
-
-
 class ReferralPrefixListCreateView(APIView):
 
     def get(self, request):
@@ -2182,309 +1857,20 @@ class ReferralPrefixDetailView(APIView):
 
 
 
-
-
-
-
-
 # -------------------------------
 # Wishlist List & Create API
 # -------------------------------
 
 
-class WishlistListCreateView_old(APIView):
-    """
-    GET  → List all wishlists (paginated)
-    POST → Create a new wishlist
-    """
-
-    def get(self, request):
-        try:
-            wishlists = Wishlist.objects.all().order_by('-created_at')
-
-            paginator = GlobalPagination()
-            paginated_wishlists = paginator.paginate_queryset(
-                wishlists,
-                request
-            )
-
-            serializer = WishlistSerializer(
-                paginated_wishlists,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    def post(self, request):
-        try:
-            serializer = WishlistSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {
-                        "message": "Wishlist item created successfully",
-                        "data": serializer.data
-                    },
-                    status=status.HTTP_201_CREATED
-                )
-
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
 
 # -------------------------------
 # Wishlist Detail (GET, PUT, DELETE)
 # -------------------------------
-class WishlistDetailView_old(APIView):
-    """
-    GET    → Retrieve a single wishlist item
-    PUT    → Update wishlist
-    DELETE → Remove wishlist
-    """
-    def get(self, request, wishlist_id):
-        try:
-            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
-            serializer = WishlistSerializer(wishlist)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def put(self, request, wishlist_id):
-        try:
-            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
-            serializer = WishlistSerializer(wishlist, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(
-                    {"message": "Wishlist updated successfully", "data": serializer.data},
-                    status=status.HTTP_200_OK
-                )
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def delete(self, request, wishlist_id):
-        try:
-            wishlist = get_object_or_404(Wishlist, id=wishlist_id)
-            wishlist.delete()
-            return Response({"message": "Wishlist deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-
-
-
-
-
-
-
-class WishlistByUserAPIView_old(APIView):
-    """
-    GET → Retrieve all wishlist items for a given user (paginated)
-    """
-
-    def get(self, request, user_id):
-        try:
-            wishlists = (
-                Wishlist.objects
-                .filter(user_id=user_id)
-                .order_by('-created_at')
-            )
-
-            paginator = GlobalPagination()
-            paginated_wishlists = paginator.paginate_queryset(
-                wishlists,
-                request
-            )
-
-            serializer = WishlistSerializer(
-                paginated_wishlists,
-                many=True
-            )
-
-            return paginator.get_paginated_response(serializer.data)
-
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-
-
-
-
-
-class CartListCreateView_old(APIView):
-
-    # 🔹 GET ALL CART ITEMS (ADMIN / INTERNAL)
-    def get(self, request):
-        try:
-            carts = Cart.objects.select_related(
-                'user', 'product', 'property_item'
-            ).all()
-
-            serializer = CartSerializer(carts, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    # 🔹 ADD TO CART
-    def post(self, request):
-        try:
-            user_id = request.data.get("user")
-            product_id = request.data.get("product")
-            property_id = request.data.get("property_item")
-            quantity = int(request.data.get("quantity", 1))
-
-            if not user_id:
-                return Response({"error": "user is required"}, status=400)
-
-            # PRODUCT CART
-            if product_id:
-                product = get_object_or_404(Product, id=product_id)
-
-                if quantity < 1:
-                    return Response({"error": "Quantity must be at least 1"}, status=400)
-
-                if product.available_qty < quantity:
-                    return Response({"error": "Insufficient stock"}, status=400)
-
-                cart_item, created = Cart.objects.get_or_create(
-                    user_id=user_id,
-                    product=product,
-                    defaults={"quantity": quantity}
-                )
-
-                if not created:
-                    new_qty = cart_item.quantity + quantity
-                    if product.available_qty < new_qty:
-                        return Response({"error": "Insufficient stock"}, status=400)
-
-                    cart_item.quantity = new_qty
-                    cart_item.save()
-
-            # PROPERTY CART
-            elif property_id:
-                property_item = get_object_or_404(Property, id=property_id)
-
-                if Cart.objects.filter(user_id=user_id, property_item=property_item).exists():
-                    return Response(
-                        {"error": "Property already added to cart"},
-                        status=400
-                    )
-
-                Cart.objects.create(
-                    user_id=user_id,
-                    property_item=property_item,
-                    quantity=1
-                )
-
-            else:
-                return Response(
-                    {"error": "Either product or property_item is required"},
-                    status=400
-                )
-
-            return Response(
-                {"message": "Item added to cart successfully"},
-                status=status.HTTP_201_CREATED
-            )
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-class CartByUserAPIView_old(APIView):
-
-    
-
-    def get(self, request, user_id):
-        try:
-            cart_items = Cart.objects.filter(
-                user_id=user_id
-            ).select_related('product', 'property_item')
-
-            serializer = CartSerializer(cart_items, many=True)
-
-            total_amount = sum(item.subtotal for item in cart_items)
-
-            return Response({
-                "items": serializer.data,
-                "total_amount": total_amount
-            }, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-class CartDetailView_old(APIView):
-    def get(self, request, id):
-        try:
-            cart_item = get_object_or_404(Cart, id=id)
-            serializer = CartSerializer(cart_item)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def put(self, request, id):
-        try:
-            cart_item = get_object_or_404(Cart, id=id)
-
-            quantity = int(request.data.get("quantity", cart_item.quantity))
-
-            if cart_item.product:
-                if quantity < 1:
-                    return Response({"error": "Quantity must be at least 1"}, status=400)
-
-                if cart_item.product.available_qty < quantity:
-                    return Response({"error": "Insufficient stock"}, status=400)
-
-                cart_item.quantity = quantity
-                cart_item.save()
-
-            return Response(
-                {"message": "Cart updated successfully"},
-                status=status.HTTP_200_OK
-            )
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-    def delete(self, request, id):
-        try:
-            cart_item = get_object_or_404(Cart, id=id)
-            cart_item.delete()
-            return Response(
-                {"message": "Cart item removed"},
-                status=status.HTTP_204_NO_CONTENT
-            )
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-
-
-
-from business.models import * 
 
 class WishlistListCreateView(APIView):
 
@@ -2568,81 +1954,6 @@ class WishlistDetailView(APIView):
             return Response({"error": str(e)}, status=500)
 
 
-class CartListCreateView_old(APIView):
-
-    def get(self, request):
-        try:
-            user_id = request.query_params.get("user")
-
-            carts = Cart.objects.select_related("variant", "property_item", "user")
-
-            if user_id:
-                carts = carts.filter(user_id=user_id)
-
-            serializer = CartSerializer(carts, many=True)
-            total_amount = sum(item.subtotal for item in carts)
-
-            return Response({
-                "items": serializer.data,
-                "total_amount": total_amount
-            }, status=200)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-    def post(self, request):
-        try:
-            user_id = request.data.get("user")
-            variant_id = request.data.get("variant")
-            property_id = request.data.get("property_item")
-            quantity = int(request.data.get("quantity", 1))
-
-            if not user_id:
-                return Response({"error": "user is required"}, status=400)
-
-            # PRODUCT VARIANT CART
-            if variant_id:
-                variant = get_object_or_404(ProductVariant, id=variant_id)
-
-                if quantity < 1:
-                    return Response({"error": "Quantity must be at least 1"}, status=400)
-
-                if variant.stock < quantity:
-                    return Response({"error": "Insufficient stock"}, status=400)
-
-                cart_item, created = Cart.objects.get_or_create(
-                    user_id=user_id,
-                    variant=variant,
-                    defaults={"quantity": quantity}
-                )
-
-                if not created:
-                    new_qty = cart_item.quantity + quantity
-                    if variant.stock < new_qty:
-                        return Response({"error": "Insufficient stock"}, status=400)
-                    cart_item.quantity = new_qty
-                    cart_item.save()
-
-            # PROPERTY CART
-            elif property_id:
-                property_item = get_object_or_404(Property, id=property_id)
-
-                if Cart.objects.filter(user_id=user_id, property_item=property_item).exists():
-                    return Response({"error": "Property already in cart"}, status=400)
-
-                Cart.objects.create(
-                    user_id=user_id,
-                    property_item=property_item,
-                    quantity=1
-                )
-
-            else:
-                return Response({"error": "Variant or Property is required"}, status=400)
-
-            return Response({"message": "Added to cart successfully"}, status=201)
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
 
 
 class CartListCreateView(APIView):

@@ -40,33 +40,6 @@ class Order(models.Model):
         return f"Order #{self.order_id} - {self.user}"
 
 
-# class OrderItem(models.Model):
-    
-#     order = models.ForeignKey(
-#         "orders.Order",                   # ✅ STRING (self app)
-#         on_delete=models.CASCADE,
-#         related_name="items"
-#     )
-
-#     product = models.ForeignKey(
-#         "business.Product",               # ✅ STRING
-#         on_delete=models.CASCADE
-#     )
-
-#     quantity = models.PositiveIntegerField()
-
-#     price = models.DecimalField(
-#         max_digits=12,
-#         decimal_places=2,
-#         help_text="Product price at the time of purchase"
-#     )
-
-#     def get_subtotal(self):
-#         return self.quantity * self.price
-
-#     def __str__(self):
-#         return f"{self.product.product_name} x {self.quantity}"
-
 
 
 class OrderItem(models.Model):
@@ -118,12 +91,7 @@ TRANSACTION_FOR_CHOICES = (
 
 class Transaction(models.Model):
     transaction_id = models.AutoField(primary_key=True)
-    #user_id = models.ForeignKey(User, on_delete=models.CASCADE, related_name="user_transactions")
-    #property_id = models.ForeignKey(Property, on_delete=models.CASCADE, null=True, blank=True, related_name='transactions')
-    #subscription_variant = models.ForeignKey(SubscriptionPlanVariant, on_delete=models.CASCADE,blank=True, null=True)
-    # Product transaction (via Order)
-    #order = models.ForeignKey('Order',on_delete=models.CASCADE,null=True,blank=True,related_name='transactions')
-
+    
     user_id = models.ForeignKey(
         "users.User",                     # ✅ STRING
         on_delete=models.CASCADE,
@@ -190,22 +158,12 @@ class Transaction(models.Model):
 
 
 class UserProperty(models.Model):
-    # STATUS_CHOICES = [
-    #     ('booked', 'Booked'),
-    #     ('purchased', 'Purchased'),
-    # ]
-    # STATUS_CHOICES = [
-    #     ('booked', 'Booked'),
-    #     ('sold', 'Sold'),
-    # ]
-
     STATUS_CHOICES = (
         ('booked', 'Booked'),
         ('purchased', 'Purchased'),
     )
 
-    #user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='user_properties')
-    #property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='user_properties')
+    
     user = models.ForeignKey(
         "users.User",                     # ✅ STRING
         on_delete=models.CASCADE

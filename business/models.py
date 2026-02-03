@@ -272,10 +272,10 @@ class Product(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     
-    def clean(self):
-        category_id = getattr(self.category, 'pk', None)
-        if category_id and not self.business.categories.filter(pk=category_id).exists():
-            raise ValidationError("Business is not allowed to sell in this category.")
+    # def clean(self):
+    #     category_id = getattr(self.category, 'pk', None)
+    #     if category_id and not self.business.categories.filter(pk=category_id).exists():
+    #         raise ValidationError("Business is not allowed to sell in this category.")
 
 
     @property
@@ -385,8 +385,11 @@ class ProductVariant(models.Model):
         self.sgst_amount = (price * sgst / Decimal('100'))
 
         # auto deactivate if product not approved
-        if self.product.verification_status != 'approved':
+        # if self.product.verification_status != 'approved':
+        #     self.is_active = False
+        if self.product.verification_status != 'verified':
             self.is_active = False
+
 
         super().save(*args, **kwargs)
 

@@ -5,6 +5,7 @@ from django.contrib.auth.hashers import make_password
 from django.conf import settings
 import os
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 #from business.models import *
 
 
@@ -198,38 +199,6 @@ class Department(models.Model):
     def __str__(self):
         return self.name
     
-
-# class Meeting(models.Model):
-#     MEETING_STATUS = [
-#         ("scheduled", "Scheduled"),
-#         ("completed", "Completed"),
-#         ("cancelled", "Cancelled"),
-#     ]
-
-#     meeting_id = models.AutoField(primary_key=True)
-
-#     users = models.ManyToManyField(User, related_name="meetings")
-
-#     title = models.CharField(max_length=255)
-#     scheduled_date = models.DateField()
-#     scheduled_time = models.TimeField()
-#     meeting_link = models.URLField(blank=True, null=True)
-
-#     created_by = models.ForeignKey(
-#         User, on_delete=models.SET_NULL, null=True, related_name="meetings_created"
-#     )
-
-#     status = models.CharField(max_length=20, choices=MEETING_STATUS, default="scheduled")
-#     notes = models.TextField(blank=True, null=True)
-
-#     reminder_sent = models.BooleanField(default=False)
-#     created_at = models.DateTimeField(auto_now_add=True)
-
-#     def __str__(self):
-#         return self.title
-
-
-
 
 
 
@@ -468,98 +437,6 @@ class Like(models.Model):
 
 
 
-# class Wishlist_old(models.Model):
-    
-#     user = models.ForeignKey(
-#         "users.User",          # ✅ STRING
-#         on_delete=models.CASCADE
-#     )
-#     property = models.ForeignKey(
-#         "property.Property",   # ✅ STRING
-#         on_delete=models.CASCADE,
-#         blank=True,
-#         null=True
-#     )
-#     product = models.ForeignKey(
-#         "business.Product",    # ✅ STRING
-#         on_delete=models.CASCADE,
-#         blank=True,
-#         null=True
-#     )
-#     created_at = models.DateTimeField(auto_now_add=True)
-#     def __str__(self):
-#         return f"{self.id}"
-
-
-
-
-from django.core.exceptions import ValidationError
-
-# class Cart_old(models.Model):
-    
-#     user = models.ForeignKey(
-#         "users.User",          # ✅ STRING
-#         on_delete=models.CASCADE,
-#         related_name="user_cart"
-#     )
-
-#     product = models.ForeignKey(
-#         "business.Product",    # ✅ STRING
-#         on_delete=models.CASCADE,
-#         null=True,
-#         blank=True
-#     )
-
-#     property_item = models.ForeignKey(
-#         "property.Property",   # ✅ STRING
-#         on_delete=models.CASCADE,
-#         null=True,
-#         blank=True
-#     )
-
-#     quantity = models.PositiveIntegerField(
-#         default=1,
-#         help_text="Applicable only for product"
-#     )
-
-#     created_at = models.DateTimeField(auto_now_add=True)
-
-#     class Meta:
-#         constraints = [
-#             models.UniqueConstraint(
-#                 fields=['user', 'product'],
-#                 name='unique_product_cart'
-#             )
-#         ]
-
-#     def clean(self):
-#         if not self.product and not self.property_item:
-#             raise ValidationError("Cart item must have either product or property.")
-
-#         if self.product and self.property_item:
-#             raise ValidationError("Cart item cannot have both product and property.")
-
-#         if self.property_item and self.quantity != 1:
-#             raise ValidationError("Property quantity must be 1.")
-
-#         if self.product and self.quantity < 1:
-#             raise ValidationError("Product quantity must be at least 1.")
-
-#     def get_item_price(self):
-#         if self.product:
-#             return self.product.selling_price
-#         if self.property_item:
-#             return self.property_item.price
-#         return 0
-
-#     @property
-#     def subtotal(self):   # ✅ NOW WORKS
-#         return self.get_item_price() * self.quantity
-
-#     def __str__(self):
-#         if self.product:
-#             return f"{self.user} - {self.product.product_name} x {self.quantity}"
-#         return f"{self.user} - Property: {self.property_item.title}"
 
 
 

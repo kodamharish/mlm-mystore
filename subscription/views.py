@@ -9,6 +9,11 @@ from .serializers import *
 from users.models import *  # Import your custom user model if needed
 #from transactions.models import *
 from mlm.pagination import GlobalPagination
+from django.utils import timezone
+from django.db.models import Count
+from .models import Subscription
+from .filters import *
+#from common.pagination import GlobalPagination
 
 # ------------------ Subscription Plan ------------------
 
@@ -231,29 +236,6 @@ class SubscriptionDetailView(APIView):
 
 
 
-class UserSubscriptionsView_old(APIView):
-    def get(self, request, user_id):
-        try:
-            subscriptions = Subscription.objects.filter(user_id=user_id).order_by('-subscription_id')
-
-            if not subscriptions.exists():
-                return Response({'error': 'No subscriptions found.'}, status=status.HTTP_404_NOT_FOUND)
-
-            serializer = SubscriptionSerializer(subscriptions, many=True)
-            data = serializer.data
-
-            # Extract latest status from the first (most recent) subscription
-            latest_status = data[0]['subscription_status']
-
-            # Build response: latest_status first, then list of subscriptions
-            response = [{"latest_status": latest_status}] + data
-
-            return Response(response, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 class UserSubscriptionsView(APIView):
     """
@@ -303,14 +285,6 @@ class UserSubscriptionsView(APIView):
 
 
 # Get Subscription Plans based on user_type
-class SubscriptionPlanByUserTypeView_old(APIView):
-    def get(self, request, user_type):
-        try:
-            plans = SubscriptionPlan.objects.filter(user_type=user_type)
-            serializer = SubscriptionPlanSerializer(plans, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class SubscriptionPlanByUserTypeView(APIView):
@@ -348,14 +322,6 @@ class SubscriptionPlanByUserTypeView(APIView):
 
 
 # Get Subscription Plan Variants based on user_type
-class SubscriptionPlanVariantByUserTypeView_old(APIView):
-    def get(self, request, user_type):
-        try:
-            variants = SubscriptionPlanVariant.objects.select_related("plan_id").filter(plan_id__user_type=user_type)
-            serializer = SubscriptionPlanVariantSerializer(variants, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
@@ -394,17 +360,7 @@ class SubscriptionPlanVariantByUserTypeView(APIView):
 
 
 
-# subscriptions/views.py
-from django.utils import timezone
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.db.models import Count
 
-from .models import Subscription
-from .serializers import SubscriptionSerializer
-from .filters import SubscriptionFilter
-#from common.pagination import GlobalPagination
 
 class SubscriptionSearchAPIView(APIView):
     pagination_class = GlobalPagination

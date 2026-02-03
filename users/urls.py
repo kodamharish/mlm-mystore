@@ -5,34 +5,18 @@ urlpatterns = [
     path('login/', LoginAPIView.as_view(), name='login'),
     path('login1/', LoginAPIView1.as_view(), name='login1'),
     path('logout/', LogoutAPIView.as_view(), name='logout'),
-
     path('roles/', RoleListCreateView.as_view(), name='role-list-create'),
     path('roles/<int:role_id>/', RoleDetailView.as_view(), name='role-detail'),
-
     path('users/', UserListCreateView.as_view(), name='user-list-create'),
     path('users/<int:user_id>/', UserDetailView.as_view(), name='user-detail'),
     path('users/search/', UserSearchAPIView.as_view(), name='users-search'),
-
-    #path('users/role/<str:role_name>/', UsersByRoleAPIView.as_view(), name='users-by-role'), 
-    #path('users/status/<str:user_status>/', UsersByStatus.as_view(), name='users-by-status'), 
-
-    #path('agents/referral-id/<str:referral_id>/', AgentsByReferralIdAPIView.as_view(), name='agents-by-referral-id'), 
     path('counts/', CountAPIView.as_view(), name='counts'),
-
     path('send-otp/', SendOTPView.as_view(), name='send-otp'),   
     path('verify-otp/', VerifyOTPView.as_view(), name='verify-otp'),
     path('reset-password/', ResetPasswordView.as_view(), name='reset-password'),
     path('verify-otp-reset-password/', VerifyOTPAndResetPasswordView.as_view(), name='verify-reset'),
-
-
-
     path('departments/', DepartmentListCreateView.as_view(), name='department-list'),
     path('departments/<int:id>/', DepartmentDetailView.as_view(), name='department-detail'),
-
-
-    # path("meetings/", MeetingListCreateView.as_view()),
-    # path("meetings/<int:meeting_id>/", MeetingDetailView.as_view()),
-
     path('meeting-requests/', MeetingRequestListCreateView.as_view(), name='meeting-requests'),
     path('meeting-requests/<int:request_id>/', MeetingRequestDetailView.as_view(), name='meeting-request-detail'),
     path('scheduled-meetings/', ScheduledMeetingListCreateView.as_view(), name='scheduled-meetings'),

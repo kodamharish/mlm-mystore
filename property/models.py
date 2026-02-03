@@ -4,7 +4,7 @@ from decimal import Decimal
 import os
 from dateutil.relativedelta import relativedelta
 from datetime import timedelta, date
-
+from business.models import *
 
 class PropertyCategory(models.Model):
     property_category_id = models.AutoField(primary_key=True)
@@ -16,7 +16,7 @@ class PropertyCategory(models.Model):
 
 class PropertyType(models.Model):
     property_type_id = models.AutoField(primary_key=True)
-    #category = models.ForeignKey(PropertyCategory, on_delete=models.CASCADE, related_name='types')
+    
     category = models.ForeignKey(
         "property.PropertyCategory",   # ✅ STRING
         on_delete=models.CASCADE,
@@ -85,8 +85,7 @@ class Property(models.Model):
     property_id = models.AutoField(primary_key=True)
     # Basic Info
     looking_to = models.CharField(max_length=10, choices=LOOKING_TO_CHOICES,blank=True,null=True)
-    #category = models.ForeignKey('PropertyCategory', on_delete=models.SET_NULL, null=True)
-    #property_type = models.ForeignKey('PropertyType', on_delete=models.SET_NULL, null=True)
+   
     category = models.ForeignKey(
         "property.PropertyCategory",   # ✅ STRING
         on_delete=models.SET_NULL,
@@ -160,8 +159,7 @@ class Property(models.Model):
     owner_email = models.EmailField(blank=True, null=True)
     # User
     # Who originally added the property
-    #user_id = models.ForeignKey(User, on_delete=models.CASCADE, related_name='properties_added')
-    #added_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="user_added_properties",null=True)
+    
     user_id = models.ForeignKey(
         "users.User",
         on_delete=models.CASCADE,
@@ -199,7 +197,7 @@ class Property(models.Model):
     agreement_file = models.FileField(upload_to='agreements/files/', null=True, blank=True)
     # Flags
     is_featured = models.BooleanField(default=False)
-    #status = models.CharField(max_length=100,default="available")
+    
     #  Status
     status = models.CharField(
         max_length=20,
@@ -266,19 +264,19 @@ def property_image_upload_to(instance, filename):
     return f'properties/{user_id}/images/{filename}'
 
 def property_video_upload_to(instance, filename):
-    # user_id = instance.property.user.id
+    
     user_id = instance.property.user_id.user_id
     return f'properties/{user_id}/videos/{filename}'
 
 
 def property_file_upload_to(instance, filename):
-    # user_id = instance.property.user.id
+    
     user_id = instance.property.user_id.user_id
     return f'properties/{user_id}/files/{filename}'
 
 
 class PropertyImage(models.Model):
-    #property = models.ForeignKey(Property, related_name='images', on_delete=models.CASCADE)
+    
     property = models.ForeignKey(
         "property.Property",
         related_name="images",
@@ -291,7 +289,7 @@ class PropertyImage(models.Model):
 
 
 class PropertyVideo(models.Model):
-    #property = models.ForeignKey(Property, related_name='videos', on_delete=models.CASCADE)
+    
     property = models.ForeignKey(
         "property.Property",
         related_name="videos",
@@ -304,7 +302,7 @@ class PropertyVideo(models.Model):
 
 
 class PropertyFile(models.Model):
-    #property = models.ForeignKey(Property, related_name='files', on_delete=models.CASCADE)
+    
     property = models.ForeignKey(
         "property.Property",
         related_name="files",
@@ -316,85 +314,10 @@ class PropertyFile(models.Model):
         return f"File for {self.property}"
 
 
-class EMIOption(models.Model):
-    #property = models.ForeignKey('Property', on_delete=models.CASCADE, related_name="emi_options")
-    property = models.ForeignKey(
-        "property.Property",
-        on_delete=models.CASCADE,
-        related_name="emi_options"
-    )
-    period_months = models.PositiveIntegerField()
-    emi_amount = models.DecimalField(max_digits=15, decimal_places=2, blank=True)
-
-    class Meta:
-        unique_together = ('property', 'period_months')  # prevents duplicate period for same property
-
-    
-    def save(self, *args, **kwargs):
-        if self.property and self.property.total_property_value and self.period_months:
-            # Subtract booking amount from total value before EMI calculation
-            loan_amount = self.property.total_property_value - (self.property.booking_amount or 0)
-            self.emi_amount = loan_amount / Decimal(self.period_months)
-        super().save(*args, **kwargs)
-
-
-    def __str__(self):
-        return f"{self.period_months} months - ₹{self.emi_amount:.2f}"
-
-
-
-class UserEMI(models.Model):
-    #user = models.ForeignKey(User, on_delete=models.CASCADE)
-    #property = models.ForeignKey(Property, on_delete=models.CASCADE)
-    #emi_option = models.ForeignKey(EMIOption, on_delete=models.CASCADE)
-    user = models.ForeignKey(
-        "users.User",   # ✅ STRING
-        on_delete=models.CASCADE
-    )
-    property = models.ForeignKey(
-        "property.Property",
-        on_delete=models.CASCADE
-    )
-    emi_option = models.ForeignKey(
-        "property.EMIOption",
-        on_delete=models.CASCADE
-    )
-    start_date = models.DateField()
-    end_date = models.DateField(blank=True, null=True)
-
-    def save(self, *args, **kwargs):
-        if self.start_date and self.emi_option:
-            self.end_date = self.start_date + relativedelta(months=self.emi_option.period_months)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.user} - {self.emi_option.period_months}M EMI for {self.property}"
-
-
-# class Notification(models.Model):
-#     message = models.CharField(max_length=255)
-#     #property = models.ForeignKey('Property', on_delete=models.CASCADE, related_name='notifications')
-#     property = models.ForeignKey(
-#         "property.Property",
-#         on_delete=models.CASCADE,
-#         related_name="notifications"
-#     )
-#     created_at = models.DateTimeField(auto_now_add=True)
-#     #is_read = models.BooleanField(default=False)
-#     #visible_to_users = models.ManyToManyField(User, related_name='notifications_visible_to')
-#     visible_to_users = models.ManyToManyField(
-#         "users.User",   # ✅ STRING
-#         related_name="notifications_visible_to"
-#     )
-
-#     def __str__(self):
-#         return f"{self.message} - {self.property.property_title}"
 
 
 
 
-
-from business.models import *
 
 
 class Notification(models.Model):
@@ -402,6 +325,13 @@ class Notification(models.Model):
 
     property = models.ForeignKey(
         "property.Property",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="notifications"
+    )
+    product = models.ForeignKey(
+        "business.Product",
         on_delete=models.CASCADE,
         null=True,
         blank=True,
@@ -433,8 +363,6 @@ class Notification(models.Model):
 
 
 class UserNotificationStatus(models.Model):
-    #user = models.ForeignKey(User, on_delete=models.CASCADE)
-    #notification = models.ForeignKey(Notification, on_delete=models.CASCADE)
     user = models.ForeignKey(
         "users.User",
         on_delete=models.CASCADE
@@ -453,14 +381,6 @@ class UserNotificationStatus(models.Model):
 
 
 class UserProperty(models.Model):
-    # STATUS_CHOICES = [
-    #     ('booked', 'Booked'),
-    #     ('purchased', 'Purchased'),
-    # ]
-    # STATUS_CHOICES = [
-    #     ('booked', 'Booked'),
-    #     ('sold', 'Sold'),
-    # ]
 
     STATUS_CHOICES = (
         ('booked', 'Booked'),
