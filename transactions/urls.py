@@ -30,6 +30,8 @@ urlpatterns = [
     path("users/<int:user_id>/order-summary/", UserOrderSummaryAPIView.as_view()),
     path("order-summary/", OrderSummaryAPIView.as_view()),
     path("admin-summary/", AdminSummaryAPIView.as_view()),
+    path("summary/", AdminSummaryAPIView.as_view()),
+    
 
 
 
