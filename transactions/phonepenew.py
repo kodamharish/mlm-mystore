@@ -21,6 +21,8 @@ import os
 from django.conf import settings
 from django.core.mail import send_mail
 from django.conf import settings
+from django.db import transaction as db_transaction
+from reportlab.pdfgen import canvas
 
 
 
@@ -37,14 +39,34 @@ class SubscriptionInitiatePaymentAPIView(APIView):
 
             user = User.objects.get(user_id=user_id)
             variant = SubscriptionPlanVariant.objects.get(variant_id=variant_id)
-            amount = int(variant.price * 100)  # PhonePe requires amount in paise
 
+            amount = int(variant.price * 100)  # PhonePe expects paise
+
+            # STEP 1: Initiate payment with PhonePe
             result = initiate_payment(amount=amount, redirect_url=redirect_url)
 
+            merchant_order_id = result.get("merchant_order_id")
+
+            if not merchant_order_id:
+                return Response({"error": "Failed to initiate payment"}, status=500)
+
+            # STEP 2: Create pending Transaction (like Product flow)
+            txn = Transaction.objects.create(
+                user_id=user,
+                transaction_for="subscription",
+                paid_amount=variant.price,
+                status="pending",
+                subscription_variant=variant,
+                plan_name=variant.plan_id.plan_name,
+                phone_pe_merchant_order_id=merchant_order_id
+            )
+
             return Response({
-                "merchant_order_id": result["merchant_order_id"],
-                "payment_url": result["redirect_url"]
-            }, status=status.HTTP_200_OK)
+                "transaction_id": txn.transaction_id,
+                "merchant_order_id": merchant_order_id,
+                "payment_url": result["redirect_url"],
+                "amount": variant.price
+            }, status=200)
 
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=404)
@@ -52,8 +74,6 @@ class SubscriptionInitiatePaymentAPIView(APIView):
             return Response({"error": "Subscription plan not found"}, status=404)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
-
-
 
 
 
@@ -186,92 +206,86 @@ def generate_transaction_doc_number():
     return f"INV{next_number}"
 
 
+
+
+
 class SubscriptionConfirmPaymentAPIView(APIView):
     def post(self, request):
         try:
             merchant_order_id = request.data.get("merchant_order_id")
-            user_id = request.data.get("user_id")
-            variant_id = request.data.get("variant_id")
 
-            if not all([merchant_order_id, user_id, variant_id]):
-                return Response({"error": "Missing required fields"}, status=400)
+            if not merchant_order_id:
+                return Response({"error": "merchant_order_id required"}, status=400)
 
-            # Step 1: Check payment status from PhonePe
+            # STEP 1: Check payment status from PhonePe
             payment_status_data = check_payment_status(merchant_order_id)
-            payment_state = payment_status_data.get("status")
 
-            if payment_state != "COMPLETED":
-                return Response({
-                    **payment_status_data,
-                    "message": "Payment not completed"
-                }, status=202)
+            if payment_status_data.get("status") != "COMPLETED":
+                return Response(
+                    {**payment_status_data, "message": "Payment not completed"},
+                    status=202
+                )
 
-            # Step 2: Get user and variant
-            user = User.objects.get(user_id=user_id)
-            variant = SubscriptionPlanVariant.objects.get(variant_id=variant_id)
-            plan_name = variant.plan_id.plan_name
-            price = variant.price
-            
+            with db_transaction.atomic():
 
-            # Step 3: Extract payment details
-            payment_details = payment_status_data.get("payment_details", [])
-            phone_pe_transaction_id = payment_details[0]["transaction_id"] if payment_details else None
-            payment_mode_from_response = payment_details[0]["payment_mode"] if payment_details else None
+                # STEP 2: Lock and fetch pending transaction
+                txn = Transaction.objects.select_for_update().get(
+                    phone_pe_merchant_order_id=merchant_order_id,
+                    status="pending"
+                )
 
-            # Step 4: Generate document number for invoice
-            #doc_type = "invoice"
-            #doc_number = generate_transaction_doc_number(doc_type)
-            doc_number = generate_transaction_doc_number()
+                user = txn.user_id
+                variant = txn.subscription_variant
 
+                # STEP 3: Extract payment details
+                payment_details = payment_status_data.get("payment_details", [])
+                phone_pe_transaction_id = (
+                    payment_details[0]["transaction_id"] if payment_details else None
+                )
+                payment_mode_from_response = (
+                    payment_details[0]["payment_mode"] if payment_details else None
+                )
 
-            
+                # STEP 4: Generate document number
+                doc_number = generate_transaction_doc_number()
 
-            # Step 6: Create transaction with invoice details
-            transaction = Transaction.objects.create(
-                user_id=user,
-                transaction_for='subscription',
-                paid_amount=price,
-                payment_mode=payment_mode_from_response,
-                subscription_variant=variant,
-                plan_name=plan_name,
-                
-                phone_pe_merchant_order_id=payment_status_data.get("merchant_order_id"),
-                phone_pe_order_id=payment_status_data.get("order_id"),
-                phone_pe_transaction_id=phone_pe_transaction_id,
-                #document_type=doc_type,
-                document_number=doc_number
-            )
+                # STEP 5: Update transaction (instead of creating new)
+                txn.phone_pe_transaction_id = phone_pe_transaction_id
+                txn.phone_pe_order_id = payment_status_data.get("order_id")
+                txn.payment_mode = payment_mode_from_response
+                txn.status = "success"
+                txn.document_number = doc_number
+                txn.save(update_fields=[
+                    "phone_pe_transaction_id",
+                    "phone_pe_order_id",
+                    "payment_mode",
+                    "status",
+                    "document_number"
+                ])
 
-            # Step 5: Create subscription
-            Subscription.objects.create(
-                user_id=user,
-                subscription_variant=variant,
-                subscription_status='paid'
-            )
+                # STEP 6: Create subscription
+                Subscription.objects.create(
+                    user_id=user,
+                    subscription_variant=variant,
+                    subscription_status="paid"
+                )
 
-            user.status = 'active'
-            user.save()
+                # Activate user
+                user.status = "active"
+                user.save(update_fields=["status"])
 
-            # Step 7: Generate invoice PDF for subscription
-            #generate_subscription_invoice_pdf(transaction, user, variant, doc_number, doc_type)
-            generate_subscription_invoice_pdf(transaction, user, variant, doc_number)
-
+            # STEP 7: Generate invoice PDF
+            generate_subscription_invoice_pdf(txn, user, variant, doc_number)
 
             return Response({
                 "message": "Payment verified, subscription created, and invoice generated successfully",
                 **payment_status_data
             }, status=201)
 
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
-        except SubscriptionPlanVariant.DoesNotExist:
-            return Response({"error": "Subscription plan not found"}, status=404)
+        except Transaction.DoesNotExist:
+            return Response({"error": "Transaction not found or already processed"}, status=404)
         except Exception as e:
-            return Response({'error': str(e)}, status=500)
-
-
-
-
+            return Response({"error": str(e)}, status=500)
 
 
 class PropertyConfirmPaymentAPIView(APIView):
@@ -815,180 +829,12 @@ class ProductInitiatePaymentAPIView_old(APIView):
         try:
             user_id = request.data.get("user_id")
             redirect_url = request.data.get("redirect_url")
+            payment_method = request.data.get("payment_method")  # "online" or "cod"
 
-            if not all([user_id, redirect_url]):
-                return Response(
-                    {"error": "user_id and redirect_url are required"},
-                    status=400
-                )
+            if not user_id or not payment_method:
+                return Response({"error": "user_id and payment_method required"}, status=400)
 
             user = User.objects.get(user_id=user_id)
-
-            cart_items = Cart.objects.filter(user=user, product__isnull=False)
-
-            if not cart_items.exists():
-                return Response({"error": "Cart is empty"}, status=400)
-
-            total_amount = 0
-
-            # STEP 1: Stock validation
-            for item in cart_items:
-                if item.product.available_qty < item.quantity:
-                    return Response(
-                        {
-                            "error": f"Insufficient stock for {item.product.product_name}"
-                        },
-                        status=400
-                    )
-
-            # STEP 2: Create Order
-            order = Order.objects.create(user=user, status="pending")
-
-            # STEP 3: Create OrderItems
-            for item in cart_items:
-                price = item.product.selling_price
-
-                OrderItem.objects.create(
-                    order=order,
-                    product=item.product,
-                    quantity=item.quantity,
-                    price=price
-                )
-
-                total_amount += price * item.quantity
-
-            order.total_amount = total_amount
-            order.save(update_fields=["total_amount"])
-
-            # STEP 4: Initiate payment
-            amount_in_paise = int(total_amount * 100)
-
-            result = initiate_payment(
-                amount=amount_in_paise,
-                redirect_url=redirect_url
-            )
-
-            # STEP 5: Create pending transaction
-            Transaction.objects.create(
-                user_id=user,
-                transaction_for="product",
-                order=order,
-                paid_amount=total_amount,
-                status="pending",
-                phone_pe_merchant_order_id=result["merchant_order_id"]
-            )
-
-            return Response({
-                "order_id": order.order_id,
-                "merchant_order_id": result["merchant_order_id"],
-                "payment_url": result["redirect_url"],
-                "amount": total_amount
-            }, status=200)
-
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-from django.db import transaction as db_transaction
-
-class ProductConfirmPaymentAPIView_old(APIView):
-    def post(self, request):
-        try:
-            merchant_order_id = request.data.get("merchant_order_id")
-
-            if not merchant_order_id:
-                return Response({"error": "merchant_order_id required"}, status=400)
-
-            payment_status_data = check_payment_status(merchant_order_id)
-
-            if payment_status_data.get("status") != "COMPLETED":
-                return Response(
-                    {
-                        **payment_status_data,
-                        "message": "Payment not completed"
-                    },
-                    status=202
-                )
-
-            with db_transaction.atomic():
-
-                txn = Transaction.objects.select_for_update().get(
-                    phone_pe_merchant_order_id=merchant_order_id,
-                    status="pending"
-                )
-
-                order = txn.order
-                user = txn.user_id
-
-                # Deduct stock
-                for item in order.items.select_related("product"):
-                    product = item.product
-
-                    if product.available_qty < item.quantity:
-                        raise Exception("Stock mismatch during payment")
-
-                    product.available_qty -= item.quantity
-                    product.save(update_fields=["available_qty"])
-
-                # Update transaction
-                payment_details = payment_status_data.get("payment_details", [])
-
-                txn.phone_pe_transaction_id = (
-                    payment_details[0]["transaction_id"]
-                    if payment_details else None
-                )
-                txn.payment_mode = (
-                    payment_details[0]["payment_mode"]
-                    if payment_details else None
-                )
-                txn.phone_pe_order_id = payment_status_data.get("order_id")
-                txn.status = "success"
-                txn.document_number = generate_transaction_doc_number()
-                txn.save()
-
-                # Update order
-                order.status = "paid"
-                order.save(update_fields=["status"])
-
-                # Clear cart
-                Cart.objects.filter(user=user).delete()
-
-                # Invoice
-                generate_product_invoice_pdf(
-                    transaction=txn,
-                    order=order,
-                    user=user
-                )
-
-            return Response(
-                {
-                    "message": "Payment successful, order confirmed",
-                    **payment_status_data
-                },
-                status=201
-            )
-
-        except Transaction.DoesNotExist:
-            return Response({"error": "Transaction not found"}, status=404)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-
-
-class ProductInitiatePaymentAPIView(APIView):
-    def post(self, request):
-        try:
-            user_id = request.data.get("user_id")
-            redirect_url = request.data.get("redirect_url")
-
-            if not user_id or not redirect_url:
-                return Response({"error": "user_id and redirect_url required"}, status=400)
-
-            user = User.objects.get(user_id=user_id)
-
             cart_items = Cart.objects.filter(user=user)
 
             if not cart_items.exists():
@@ -996,14 +842,13 @@ class ProductInitiatePaymentAPIView(APIView):
 
             total_amount = 0
 
-            # STEP 1: Stock validation for variants only
+            # STEP 1: Stock validation (variants only)
             for item in cart_items:
-                if item.variant:
-                    if item.variant.stock < item.quantity:
-                        return Response(
-                            {"error": f"Insufficient stock for {item.variant.sku}"},
-                            status=400
-                        )
+                if item.variant and item.variant.stock < item.quantity:
+                    return Response(
+                        {"error": f"Insufficient stock for {item.variant.sku}"},
+                        status=400
+                    )
 
             # STEP 2: Create Order
             order = Order.objects.create(user=user, status="pending")
@@ -1033,288 +878,217 @@ class ProductInitiatePaymentAPIView(APIView):
             order.total_amount = total_amount
             order.save(update_fields=["total_amount"])
 
-            # STEP 4: Initiate payment
-            amount_in_paise = int(total_amount * 100)
-            result = initiate_payment(amount=amount_in_paise, redirect_url=redirect_url)
+            # =========================
+            # ✅ CASE 1: CASH ON DELIVERY
+            # =========================
+            if payment_method == "cod":
+                Transaction.objects.create(
+                    user_id=user,
+                    transaction_for="product",
+                    order=order,
+                    paid_amount=0,
+                    payment_method="COD",
+                    status="pending"
+                )
 
-            Transaction.objects.create(
-                user_id=user,
-                transaction_for="product",
-                order=order,
-                paid_amount=total_amount,
-                status="pending",
-                phone_pe_merchant_order_id=result["merchant_order_id"]
-            )
+                # ✅ CLEAR CART IMMEDIATELY FOR COD
+                Cart.objects.filter(user=user).delete()
 
-            return Response({
-                "order_id": order.order_id,
-                "merchant_order_id": result["merchant_order_id"],
-                "payment_url": result["redirect_url"],
-                "amount": total_amount
-            }, status=200)
+                return Response({
+                    "message": "Order placed with Cash on Delivery",
+                    "order_id": order.order_id,
+                    "amount": total_amount,
+                    "payment_method": "cod"
+                }, status=200)
+
+            # =========================
+            # ✅ CASE 2: ONLINE PAYMENT
+            # =========================
+            if payment_method == "online":
+                if not redirect_url:
+                    return Response({"error": "redirect_url required for online payment"}, status=400)
+
+                amount_in_paise = int(total_amount * 100)
+                result = initiate_payment(amount=amount_in_paise, redirect_url=redirect_url)
+
+                Transaction.objects.create(
+                    user_id=user,
+                    transaction_for="product",
+                    order=order,
+                    paid_amount=total_amount,
+                    status="pending",
+                    payment_method="ONLINE",
+                    phone_pe_merchant_order_id=result["merchant_order_id"]
+                )
+
+                return Response({
+                    "order_id": order.order_id,
+                    "merchant_order_id": result["merchant_order_id"],
+                    "payment_url": result["redirect_url"],
+                    "amount": total_amount,
+                    "payment_method": "online"
+                }, status=200)
+
+            return Response({"error": "Invalid payment_method"}, status=400)
 
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=404)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
-class ProductConfirmPaymentAPIView_new1(APIView):
+
+
+
+
+
+
+class ProductInitiatePaymentAPIView(APIView):
     def post(self, request):
         try:
-            merchant_order_id = request.data.get("merchant_order_id")
+            user_id = request.data.get("user_id")
+            redirect_url = request.data.get("redirect_url")
+            payment_method = request.data.get("payment_method")  # "online" or "cod"
 
-            if not merchant_order_id:
-                return Response({"error": "merchant_order_id required"}, status=400)
+            shipping_address = request.data.get("shipping_address")
+            billing_address = request.data.get("billing_address")
 
-            payment_status_data = check_payment_status(merchant_order_id)
+            if not user_id or not payment_method:
+                return Response({"error": "user_id and payment_method required"}, status=400)
 
-            if payment_status_data.get("status") != "COMPLETED":
-                return Response({**payment_status_data, "message": "Payment not completed"}, status=202)
+            if not shipping_address:
+                return Response({"error": "shipping_address is required"}, status=400)
 
-            with db_transaction.atomic():
+            user = User.objects.get(user_id=user_id)
+            cart_items = Cart.objects.filter(user=user)
 
-                txn = Transaction.objects.select_for_update().get(
-                    phone_pe_merchant_order_id=merchant_order_id,
-                    status="pending"
-                )
+            if not cart_items.exists():
+                return Response({"error": "Cart is empty"}, status=400)
 
-                order = txn.order
-                user = txn.user_id
+            total_amount = 0
 
-                # Deduct stock for variants only
-                for item in order.items.select_related("variant"):
-                    if item.variant:
-                        if item.variant.stock < item.quantity:
-                            raise Exception("Stock mismatch")
-                        item.variant.stock -= item.quantity
-                        item.variant.save(update_fields=["stock"])
-
-                txn.status = "success"
-                txn.document_number = generate_transaction_doc_number()
-                txn.save()
-
-                order.status = "paid"
-                order.save(update_fields=["status"])
-
-                Cart.objects.filter(user=user).delete()
-
-            return Response({"message": "Payment successful", **payment_status_data}, status=201)
-
-        except Transaction.DoesNotExist:
-            return Response({"error": "Transaction not found"}, status=404)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-
-
-class ProductConfirmPaymentAPIView_new2(APIView):
-    def post(self, request):
-        try:
-            merchant_order_id = request.data.get("merchant_order_id")
-
-            if not merchant_order_id:
-                return Response({"error": "merchant_order_id required"}, status=400)
-
-            payment_status_data = check_payment_status(merchant_order_id)
-
-            if payment_status_data.get("status") != "COMPLETED":
-                return Response({**payment_status_data, "message": "Payment not completed"}, status=202)
+            # STEP 1: Stock validation (variants only)
+            for item in cart_items:
+                if item.variant and item.variant.stock < item.quantity:
+                    return Response(
+                        {"error": f"Insufficient stock for {item.variant.sku}"},
+                        status=400
+                    )
 
             with db_transaction.atomic():
+                # STEP 2: Create Order
+                order = Order.objects.create(user=user, status="pending")
 
-                txn = Transaction.objects.select_for_update().get(
-                    phone_pe_merchant_order_id=merchant_order_id,
-                    status="pending"
-                )
-
-                order = txn.order
-                user = txn.user_id
-
-                # Deduct stock for variants only
-                for item in order.items.select_related("variant__product__business"):
+                # STEP 3: Create OrderItems
+                for item in cart_items:
                     if item.variant:
-                        if item.variant.stock < item.quantity:
-                            raise Exception("Stock mismatch")
-                        item.variant.stock -= item.quantity
-                        item.variant.save(update_fields=["stock"])
+                        price = item.variant.selling_price or item.variant.mrp
+                        OrderItem.objects.create(
+                            order=order,
+                            variant=item.variant,
+                            quantity=item.quantity,
+                            price=price
+                        )
+                        total_amount += price * item.quantity
 
-                # Update transaction
-                txn.status = "success"
-                txn.document_number = generate_transaction_doc_number()
-                txn.save(update_fields=["status", "document_number"])
+                    elif item.property_item:
+                        price = item.property_item.total_property_value
+                        OrderItem.objects.create(
+                            order=order,
+                            property_item=item.property_item,
+                            quantity=1,
+                            price=price
+                        )
+                        total_amount += price
 
-                # Update order
-                order.status = "paid"
-                order.save(update_fields=["status"])
+                order.total_amount = total_amount
+                order.save(update_fields=["total_amount"])
 
-                # Clear cart
-                Cart.objects.filter(user=user).delete()
-
-            # -----------------------------------------
-            # EMAIL SECTION
-            # -----------------------------------------
-
-            # Email to BUYER
-            buyer_email = user.email
-            send_mail(
-                subject="Order Confirmation",
-                message=f"Hi {user.username},\n\nYour order #{order.order_id} was placed successfully!",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[buyer_email],
-                fail_silently=True
-            )
-
-            # Email to SELLERS using business.support_email
-            seller_emails = set()
-
-            for item in order.items.select_related("variant__product__business"):
-                if item.variant:
-                    business = item.variant.product.business
-                    if business.support_email:
-                        seller_emails.add(business.support_email)
-
-            for seller_email in seller_emails:
-                send_mail(
-                    subject="New Order Received",
-                    message=f"A new order #{order.order_id} has been placed. Please fulfill it.",
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[seller_email],
-                    fail_silently=True
+                # STEP 4: Save Shipping Address
+                OrderAddress.objects.create(
+                    order=order,
+                    address_type="shipping",
+                    full_name=shipping_address.get("full_name"),
+                    phone=shipping_address.get("phone"),
+                    address_line1=shipping_address.get("address_line1"),
+                    address_line2=shipping_address.get("address_line2"),
+                    city=shipping_address.get("city"),
+                    state=shipping_address.get("state"),
+                    pincode=shipping_address.get("pincode"),
+                    country=shipping_address.get("country", "India"),
                 )
 
-            return Response({"message": "Payment successful", **payment_status_data}, status=201)
+                # STEP 5: Save Billing Address (optional)
+                if billing_address:
+                    OrderAddress.objects.create(
+                        order=order,
+                        address_type="billing",
+                        full_name=billing_address.get("full_name"),
+                        phone=billing_address.get("phone"),
+                        address_line1=billing_address.get("address_line1"),
+                        address_line2=billing_address.get("address_line2"),
+                        city=billing_address.get("city"),
+                        state=billing_address.get("state"),
+                        pincode=billing_address.get("pincode"),
+                        country=billing_address.get("country", "India"),
+                    )
 
-        except Transaction.DoesNotExist:
-            return Response({"error": "Transaction not found"}, status=404)
+                # =========================
+                # ✅ CASE 1: CASH ON DELIVERY
+                # =========================
+                if payment_method == "cod":
+                    Transaction.objects.create(
+                        user_id=user,
+                        transaction_for="product",
+                        order=order,
+                        paid_amount=0,
+                        payment_method="COD",
+                        status="pending"
+                    )
+
+                    # ✅ CLEAR CART IMMEDIATELY FOR COD
+                    Cart.objects.filter(user=user).delete()
+
+                    return Response({
+                        "message": "Order placed with Cash on Delivery",
+                        "order_id": order.order_id,
+                        "amount": total_amount,
+                        "payment_method": "cod"
+                    }, status=200)
+
+                # =========================
+                # ✅ CASE 2: ONLINE PAYMENT
+                # =========================
+                if payment_method == "online":
+                    if not redirect_url:
+                        return Response({"error": "redirect_url required for online payment"}, status=400)
+
+                    amount_in_paise = int(total_amount * 100)
+                    result = initiate_payment(amount=amount_in_paise, redirect_url=redirect_url)
+
+                    Transaction.objects.create(
+                        user_id=user,
+                        transaction_for="product",
+                        order=order,
+                        paid_amount=total_amount,
+                        status="pending",
+                        payment_method="ONLINE",
+                        phone_pe_merchant_order_id=result["merchant_order_id"]
+                    )
+
+                    return Response({
+                        "order_id": order.order_id,
+                        "merchant_order_id": result["merchant_order_id"],
+                        "payment_url": result["redirect_url"],
+                        "amount": total_amount,
+                        "payment_method": "online"
+                    }, status=200)
+
+                return Response({"error": "Invalid payment_method"}, status=400)
+
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
-
-
-class ProductConfirmPaymentAPIView_new3(APIView):
-    def post(self, request):
-        try:
-            merchant_order_id = request.data.get("merchant_order_id")
-
-            if not merchant_order_id:
-                return Response({"error": "merchant_order_id required"}, status=400)
-
-            payment_status_data = check_payment_status(merchant_order_id)
-
-            if payment_status_data.get("status") != "COMPLETED":
-                return Response({**payment_status_data, "message": "Payment not completed"}, status=202)
-
-            with db_transaction.atomic():
-
-                txn = Transaction.objects.select_for_update().get(
-                    phone_pe_merchant_order_id=merchant_order_id,
-                    status="pending"
-                )
-
-                order = txn.order
-                user = txn.user_id
-
-                # Deduct stock for variants only
-                for item in order.items.select_related("variant__product__business"):
-                    if item.variant:
-                        if item.variant.stock < item.quantity:
-                            raise Exception("Stock mismatch")
-                        item.variant.stock -= item.quantity
-                        item.variant.save(update_fields=["stock"])
-
-                # Extract payment details
-                payment_details = payment_status_data.get("payment_details", [])
-
-                txn.phone_pe_transaction_id = (
-                    payment_details[0]["transaction_id"] if payment_details else None
-                )
-                txn.payment_mode = (
-                    payment_details[0]["payment_mode"] if payment_details else None
-                )
-
-                txn.phone_pe_order_id = payment_status_data.get("order_id")
-
-                txn.status = "success"
-                txn.document_number = generate_transaction_doc_number()
-                txn.save(update_fields=[
-                    "status",
-                    "document_number",
-                    "phone_pe_transaction_id",
-                    "phone_pe_order_id",
-                    "payment_mode"
-                ])
-
-                order.status = "paid"
-                order.save(update_fields=["status"])
-
-                Cart.objects.filter(user=user).delete()
-
-            # ------------------------------
-            # GENERATE PDF INVOICE (Variant Based)
-            # ------------------------------
-            generate_variant_invoice_pdf(
-                transaction=txn,
-                order=order,
-                user=user
-            )
-
-            # ------------------------------
-            # EMAIL SECTION
-            # ------------------------------
-
-            buyer_email = user.email
-            send_mail(
-                subject="Order Confirmation",
-                message=f"Hi {user.username},\n\nYour order #{order.order_id} was placed successfully!",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[buyer_email],
-                fail_silently=True
-            )
-
-            seller_emails = set()
-            for item in order.items.select_related("variant__product__business"):
-                if item.variant:
-                    business = item.variant.product.business
-                    if business.support_email:
-                        seller_emails.add(business.support_email)
-
-            for seller_email in seller_emails:
-                send_mail(
-                    subject="New Order Received",
-                    message=f"A new order #{order.order_id} has been placed. Please fulfill it.",
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[seller_email],
-                    fail_silently=True
-                )
-
-            return Response({"message": "Payment successful", **payment_status_data}, status=201)
-
-        except Transaction.DoesNotExist:
-            return Response({"error": "Transaction not found"}, status=404)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import Table, TableStyle
-from reportlab.lib import colors
-from io import BytesIO
-from django.core.files.base import ContentFile
-from django.core.mail import send_mail
-from django.conf import settings
-from datetime import datetime
-
-
-
-# def format_variant_attributes(attrs):
-#     if not attrs:
-#         return "-"
-#     if isinstance(attrs, dict):
-#         return " / ".join(f"{k}: {v}" for k, v in attrs.items())
-#     return str(attrs)
-
-
 
 def format_variant_attributes(attrs):
     if not attrs:
@@ -1337,7 +1111,27 @@ def format_variant_attributes(attrs):
     return str(attrs)
 
 
+
+
+
+
+
 class ProductConfirmPaymentAPIView(APIView):
+
+    def notify_user(self, users, message, product=None, product_variant=None, property_obj=None):
+        notification = Notification.objects.create(
+            message=message,
+            product=product,
+            product_variant=product_variant,
+            property=property_obj
+        )
+        notification.visible_to_users.set(users)
+
+        UserNotificationStatus.objects.bulk_create([
+            UserNotificationStatus(user=u, notification=notification, is_read=False)
+            for u in users
+        ])
+
     def post(self, request):
         try:
             merchant_order_id = request.data.get("merchant_order_id")
@@ -1494,9 +1288,451 @@ class ProductConfirmPaymentAPIView(APIView):
                 fail_silently=True
             )
 
+            # ================= IN-APP NOTIFICATIONS =================
+
+            admin_users = list(User.objects.filter(roles__role_name="Admin").distinct())
+
+            # Create item-specific notifications so product & variant are never NULL
+            for item in order.items.select_related("variant", "property_item", "variant__product"):
+
+                # ---------- PRODUCT ITEM ----------
+                if item.variant:
+                    product = item.variant.product
+                    variant = item.variant
+                    seller = product.business.user
+
+                    # Buyer
+                    self.notify_user(
+                        users=[user],
+                        message=f"Your order #{order.order_id} for {product.product_name} (SKU: {variant.sku}) has been successfully placed.",
+                        product=product,
+                        product_variant=variant
+                    )
+
+                    # Seller
+                    self.notify_user(
+                        users=[seller],
+                        message=f"You received a new order #{order.order_id} for {product.product_name} (SKU: {variant.sku}).",
+                        product=product,
+                        product_variant=variant
+                    )
+
+                    # Admin
+                    if admin_users:
+                        self.notify_user(
+                            users=admin_users,
+                            message=f"New order #{order.order_id} placed for {product.product_name} (SKU: {variant.sku}).",
+                            product=product,
+                            product_variant=variant
+                        )
+
+                # ---------- PROPERTY ITEM ----------
+                elif item.property_item:
+                    prop = item.property_item
+                    owner = prop.owner
+
+                    # Buyer
+                    self.notify_user(
+                        users=[user],
+                        message=f"Your order #{order.order_id} for property '{prop.property_title}' has been successfully placed.",
+                        property_obj=prop
+                    )
+
+                    # Owner
+                    if owner:
+                        self.notify_user(
+                            users=[owner],
+                            message=f"You received a new order #{order.order_id} for your property '{prop.property_title}'.",
+                            property_obj=prop
+                        )
+
+                    # Admin
+                    if admin_users:
+                        self.notify_user(
+                            users=admin_users,
+                            message=f"New order #{order.order_id} placed for property '{prop.property_title}'.",
+                            property_obj=prop
+                        )
+
             return Response({"message": "Payment successful", **payment_status_data}, status=201)
 
         except Transaction.DoesNotExist:
             return Response({"error": "Transaction not found"}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+
+
+
+
+
+class ConfirmCODPaymentAPIView(APIView):
+
+    def notify_user(self, users, message, product=None, product_variant=None, property_obj=None):
+        notification = Notification.objects.create(
+            message=message,
+            product=product,
+            product_variant=product_variant,
+            property=property_obj
+        )
+        notification.visible_to_users.set(users)
+
+        UserNotificationStatus.objects.bulk_create([
+            UserNotificationStatus(user=u, notification=notification, is_read=False)
+            for u in users
+        ])
+
+    def post(self, request, order_id):
+        try:
+            with db_transaction.atomic():
+                order = Order.objects.select_for_update().get(order_id=order_id)
+
+                txn = Transaction.objects.select_for_update().get(
+                    order=order,
+                    payment_method="COD",
+                    status="pending"
+                )
+
+                user = order.user
+
+                # Mark transaction as successful (cash collected)
+                txn.status = "success"
+                txn.paid_amount = order.total_amount
+                txn.document_number = generate_transaction_doc_number()
+                txn.save(update_fields=["status", "paid_amount", "document_number"])
+
+                # Mark order as delivered
+                order.status = "delivered"
+                order.save(update_fields=["status"])
+
+            # ================= GENERATE INVOICE =================
+            generate_product_invoice_pdf(transaction=txn, order=order, user=user)
+
+            # ================= EMAIL SECTION =================
+
+            buyer_email = user.email
+            buyer_phone = getattr(user, "phone_number", "")
+            buyer_first = getattr(user, "first_name", "")
+            buyer_last = getattr(user, "last_name", "")
+
+            # Group seller emails
+            seller_map = {}  # key: email, value: list of order items
+
+            for item in order.items.all():
+                if item.variant:
+                    business = item.variant.product.business
+                    email = business.support_email
+                    seller_map.setdefault(email, []).append(item)
+
+                elif item.property_item:
+                    owner = item.property_item.owner
+                    if owner and owner.email:
+                        email = owner.email
+                        seller_map.setdefault(email, []).append(item)
+
+            # SEND SELLER EMAILS
+            for seller_email, items in seller_map.items():
+                lines = []
+                lines.append(f"COD Order #{order.order_id} has been delivered and payment received.\n")
+                lines.append("Buyer Details:")
+                lines.append(f"First Name: {buyer_first}")
+                lines.append(f"Last Name: {buyer_last}")
+                lines.append(f"Phone: {buyer_phone}")
+                lines.append(f"Email: {buyer_email}\n")
+                lines.append("Order Items:")
+
+                for item in items:
+                    if item.variant:
+                        product = item.variant.product
+                        attrs = format_variant_attributes(item.variant.attributes)
+                        lines.append(
+                            f"Product: {product.product_name} ({attrs}) | Qty: {item.quantity} | Price: {item.price}"
+                        )
+                    else:
+                        p = item.property_item
+                        lines.append(
+                            f"Property: {p.property_title} | Qty: {item.quantity} | Price: {item.price}"
+                        )
+
+                lines.append(f"\nOrder Total: {order.total_amount}")
+
+                send_mail(
+                    subject=f"COD Order Delivered #{order.order_id}",
+                    message="\n".join(lines),
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[seller_email],
+                    fail_silently=True
+                )
+
+            # SEND BUYER EMAIL
+            buyer_lines = []
+            buyer_lines.append(f"Your COD order #{order.order_id} has been delivered successfully and payment received!\n")
+
+            buyer_lines.append("Buyer Details:")
+            buyer_lines.append(f"First Name: {buyer_first}")
+            buyer_lines.append(f"Last Name: {buyer_last}")
+            buyer_lines.append(f"Phone: {buyer_phone}")
+            buyer_lines.append(f"Email: {buyer_email}\n")
+
+            buyer_lines.append("Order Items:")
+
+            for item in order.items.all():
+                if item.variant:
+                    product = item.variant.product
+                    business = product.business
+                    attrs = format_variant_attributes(item.variant.attributes)
+                    buyer_lines.append(
+                        f"Product: {product.product_name} ({attrs}) | Business: {business.business_name} | Qty: {item.quantity} | Price: {item.price}"
+                    )
+                else:
+                    p = item.property_item
+                    owner = p.owner
+                    buyer_lines.append(
+                        f"Property: {p.property_title} | Owner: {owner.first_name} {owner.last_name} | Qty: {item.quantity} | Price: {item.price}"
+                    )
+
+            buyer_lines.append(f"\nOrder Total: {order.total_amount}")
+
+            send_mail(
+                subject=f"COD Order Delivered #{order.order_id}",
+                message="\n".join(buyer_lines),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[buyer_email],
+                fail_silently=True
+            )
+
+            # ================= IN-APP NOTIFICATIONS =================
+
+            admin_users = list(User.objects.filter(roles__role_name="Admin").distinct())
+
+            for item in order.items.select_related("variant", "property_item", "variant__product"):
+
+                # ---------- PRODUCT ITEM ----------
+                if item.variant:
+                    product = item.variant.product
+                    variant = item.variant
+                    seller = product.business.user
+
+                    # Buyer
+                    self.notify_user(
+                        users=[user],
+                        message=f"Your COD order #{order.order_id} for {product.product_name} (SKU: {variant.sku}) has been delivered and payment received.",
+                        product=product,
+                        product_variant=variant
+                    )
+
+                    # Seller
+                    self.notify_user(
+                        users=[seller],
+                        message=f"COD order #{order.order_id} for {product.product_name} (SKU: {variant.sku}) has been delivered and marked as paid.",
+                        product=product,
+                        product_variant=variant
+                    )
+
+                    # Admin
+                    if admin_users:
+                        self.notify_user(
+                            users=admin_users,
+                            message=f"COD order #{order.order_id} delivered and payment confirmed for {product.product_name} (SKU: {variant.sku}).",
+                            product=product,
+                            product_variant=variant
+                        )
+
+                # ---------- PROPERTY ITEM ----------
+                elif item.property_item:
+                    prop = item.property_item
+                    owner = prop.owner
+
+                    # Buyer
+                    self.notify_user(
+                        users=[user],
+                        message=f"Your COD order #{order.order_id} for property '{prop.property_title}' has been delivered and payment received.",
+                        property_obj=prop
+                    )
+
+                    # Owner
+                    if owner:
+                        self.notify_user(
+                            users=[owner],
+                            message=f"COD order #{order.order_id} for your property '{prop.property_title}' has been delivered and marked as paid.",
+                            property_obj=prop
+                        )
+
+                    # Admin
+                    if admin_users:
+                        self.notify_user(
+                            users=admin_users,
+                            message=f"COD order #{order.order_id} delivered and payment confirmed for property '{prop.property_title}'.",
+                            property_obj=prop
+                        )
+
+            return Response({"message": "COD order delivered and payment confirmed"}, status=200)
+
+        except Order.DoesNotExist:
+            return Response({"error": "Order not found"}, status=404)
+        except Transaction.DoesNotExist:
+            return Response({"error": "Pending COD transaction not found"}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+
+
+
+
+class CancelOrderAPIView(APIView):
+
+    def notify_user(self, users, message, product=None, product_variant=None, property_obj=None):
+        notification = Notification.objects.create(
+            message=message,
+            product=product,
+            product_variant=product_variant,
+            property=property_obj
+        )
+        notification.visible_to_users.set(users)
+
+        UserNotificationStatus.objects.bulk_create([
+            UserNotificationStatus(user=u, notification=notification, is_read=False)
+            for u in users
+        ])
+
+    def post(self, request, order_id):
+        try:
+            with db_transaction.atomic():
+                order = Order.objects.select_for_update().get(order_id=order_id)
+
+                # ❌ Do not allow cancel after delivery
+                if order.status == "delivered":
+                    return Response(
+                        {"error": "Delivered orders cannot be cancelled"},
+                        status=400
+                    )
+
+                # Already cancelled?
+                if order.status == "cancelled":
+                    return Response(
+                        {"message": "Order already cancelled"},
+                        status=200
+                    )
+
+                # Lock related transaction (if any)
+                txn = Transaction.objects.select_for_update().filter(order=order).first()
+
+                # Restore stock for variants
+                for item in order.items.select_related("variant"):
+                    if item.variant:
+                        item.variant.stock += item.quantity
+                        item.variant.save(update_fields=["stock"])
+
+                # Update order status
+                order.status = "cancelled"
+                order.save(update_fields=["status"])
+
+                refund_done = False
+
+                # Handle payment side
+                if txn:
+                    # ONLINE PAYMENT: if already paid, mark refunded
+                    if txn.payment_mode == "ONLINE" and txn.status == "success":
+                        # TODO: Call actual payment gateway refund API here if available
+                        txn.status = "refunded"
+                        txn.save(update_fields=["status"])
+                        refund_done = True
+
+                    # COD: just mark transaction as failed/cancelled-like
+                    elif txn.payment_mode == "COD" and txn.status == "pending":
+                        txn.status = "failed"
+                        txn.save(update_fields=["status"])
+
+                user = order.user
+
+            # ================= IN-APP NOTIFICATIONS =================
+
+            admin_users = list(User.objects.filter(roles__role_name="Admin").distinct())
+
+            for item in order.items.select_related("variant", "property_item", "variant__product"):
+
+                # ---------- PRODUCT ITEM ----------
+                if item.variant:
+                    product = item.variant.product
+                    variant = item.variant
+                    seller = product.business.user
+
+                    # Buyer
+                    buyer_msg = (
+                        f"Your order #{order.order_id} for {product.product_name} (SKU: {variant.sku}) has been cancelled."
+                    )
+                    if refund_done:
+                        buyer_msg += " Refund has been initiated."
+
+                    self.notify_user(
+                        users=[user],
+                        message=buyer_msg,
+                        product=product,
+                        product_variant=variant
+                    )
+
+                    # Seller
+                    self.notify_user(
+                        users=[seller],
+                        message=f"Order #{order.order_id} for {product.product_name} (SKU: {variant.sku}) has been cancelled by the buyer.",
+                        product=product,
+                        product_variant=variant
+                    )
+
+                    # Admin
+                    if admin_users:
+                        self.notify_user(
+                            users=admin_users,
+                            message=f"Order #{order.order_id} for {product.product_name} (SKU: {variant.sku}) has been cancelled.",
+                            product=product,
+                            product_variant=variant
+                        )
+
+                # ---------- PROPERTY ITEM ----------
+                elif item.property_item:
+                    prop = item.property_item
+                    owner = prop.owner
+
+                    # Buyer
+                    buyer_msg = (
+                        f"Your order #{order.order_id} for property '{prop.property_title}' has been cancelled."
+                    )
+                    if refund_done:
+                        buyer_msg += " Refund has been initiated."
+
+                    self.notify_user(
+                        users=[user],
+                        message=buyer_msg,
+                        property_obj=prop
+                    )
+
+                    # Owner
+                    if owner:
+                        self.notify_user(
+                            users=[owner],
+                            message=f"Order #{order.order_id} for your property '{prop.property_title}' has been cancelled by the buyer.",
+                            property_obj=prop
+                        )
+
+                    # Admin
+                    if admin_users:
+                        self.notify_user(
+                            users=admin_users,
+                            message=f"Order #{order.order_id} for property '{prop.property_title}' has been cancelled.",
+                            property_obj=prop
+                        )
+
+            return Response(
+                {
+                    "message": "Order cancelled successfully",
+                    "refund_initiated": refund_done
+                },
+                status=200
+            )
+
+        except Order.DoesNotExist:
+            return Response({"error": "Order not found"}, status=404)
         except Exception as e:
             return Response({"error": str(e)}, status=500)

@@ -68,6 +68,69 @@ class TransactionSerializer(serializers.ModelSerializer):
 
 
 
+# class OrderItemNestedSerializer_old(serializers.ModelSerializer):
+#     item_type = serializers.SerializerMethodField()
+#     item_name = serializers.SerializerMethodField()
+
+#     class Meta:
+#         model = OrderItem
+#         fields = [
+#             "id",
+#             "item_type",
+#             "item_name",
+#             "quantity",
+#             "price",
+#             "get_subtotal",
+#         ]
+
+#     def get_item_type(self, obj):
+#         if obj.variant:
+#             return "product"
+#         return "property"
+
+#     def get_item_name(self, obj):
+#         if obj.variant:
+#             return obj.variant.product.product_name
+#         return obj.property_item.property_title
+
+
+# class OrderWithItemsSerializer_old(serializers.ModelSerializer):
+#     items = OrderItemNestedSerializer(many=True, read_only=True)
+#     # user_name = serializers.CharField(source="user.first_name", read_only=True)
+#     user_id = serializers.CharField(source="user.user_id", read_only=True)
+
+#     class Meta:
+#         model = Order
+#         fields = [
+#             "order_id",
+#             "user_id",
+#             "total_amount",
+#             "status",
+#             "created_at",
+#             "items",
+#         ]
+
+
+
+
+from rest_framework import serializers
+
+class OrderAddressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrderAddress
+        fields = [
+            "address_type",
+            "full_name",
+            "phone",
+            "address_line1",
+            "address_line2",
+            "city",
+            "state",
+            "pincode",
+            "country",
+        ]
+
+
 class OrderItemNestedSerializer(serializers.ModelSerializer):
     item_type = serializers.SerializerMethodField()
     item_name = serializers.SerializerMethodField()
@@ -96,8 +159,10 @@ class OrderItemNestedSerializer(serializers.ModelSerializer):
 
 class OrderWithItemsSerializer(serializers.ModelSerializer):
     items = OrderItemNestedSerializer(many=True, read_only=True)
-    # user_name = serializers.CharField(source="user.first_name", read_only=True)
     user_id = serializers.CharField(source="user.user_id", read_only=True)
+
+    shipping_address = serializers.SerializerMethodField()
+    billing_address = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -108,6 +173,18 @@ class OrderWithItemsSerializer(serializers.ModelSerializer):
             "status",
             "created_at",
             "items",
+            "shipping_address",
+            "billing_address",
         ]
 
+    def get_shipping_address(self, obj):
+        addr = obj.addresses.filter(address_type="shipping").first()
+        if addr:
+            return OrderAddressSerializer(addr).data
+        return None
 
+    def get_billing_address(self, obj):
+        addr = obj.addresses.filter(address_type="billing").first()
+        if addr:
+            return OrderAddressSerializer(addr).data
+        return None

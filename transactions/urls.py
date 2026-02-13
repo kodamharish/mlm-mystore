@@ -25,6 +25,16 @@ urlpatterns = [
     path("orders/", OrderListAPIView.as_view()),
     path("orders/<int:order_id>/", OrderDetailAPIView.as_view()),
     path("order-items/", OrderItemListAPIView.as_view()),
+    path(
+        "orders/<int:order_id>/confirm-cod/",
+        ConfirmCODPaymentAPIView.as_view(),
+        name="confirm-cod-payment"
+    ),
+    path(
+        "orders/<int:order_id>/cancel/",
+        CancelOrderAPIView.as_view(),
+        name="cancel-order"
+    ),
 
     path("orders-with-items/", OrderWithItemsAPIView.as_view()),
     path("users/<int:user_id>/order-summary/", UserOrderSummaryAPIView.as_view()),

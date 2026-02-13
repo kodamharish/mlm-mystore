@@ -1,5 +1,9 @@
 from rest_framework import serializers
 from .models import *
+from django.utils import timezone
+from django.db import models
+from decimal import Decimal
+import json
 
 
 # ===========================
@@ -14,6 +18,11 @@ class BusinessWorkingHourSerializer(serializers.ModelSerializer):
 
 class BusinessSerializer(serializers.ModelSerializer):
     working_hours = BusinessWorkingHourSerializer(many=True, required=False)
+    categories = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Category.objects.filter(level='business'),
+        required=False
+    )
 
     class Meta:
         model = Business
@@ -22,33 +31,85 @@ class BusinessSerializer(serializers.ModelSerializer):
             'verification_status',
             'verified_at',
             'created_at',
-            'updated_at'
+            'updated_at',
+            'rating',
+            'rating_count',
+            'slug'
         )
+        extra_kwargs = {
+            'logo': {'required': False, 'allow_null': True},
+            'banner': {'required': False, 'allow_null': True},
+            'legal_name': {'required': False, 'allow_blank': True},
+            'description': {'required': False, 'allow_blank': True},
+            'address_line2': {'required': False, 'allow_blank': True},
+            'website': {'required': False, 'allow_blank': True},
+            'gst_number': {'required': False, 'allow_blank': True},
+            'pan_number': {'required': False, 'allow_blank': True},
+        }
+
+    def to_internal_value(self, data):
+        """
+        Handle both JSON and multipart form data
+        """
+        # Make a mutable copy
+        if hasattr(data, 'dict'):
+            # This is a QueryDict (multipart form data)
+            mutable_data = data.dict()
+            # Handle multiple values for categories
+            if 'categories' in data:
+                mutable_data['categories'] = data.getlist('categories')
+        else:
+            mutable_data = data.copy() if hasattr(data, 'copy') else dict(data)
+
+        # Handle working_hours - parse if it's a string
+        if 'working_hours' in mutable_data:
+            wh_value = mutable_data['working_hours']
+            if isinstance(wh_value, str):
+                try:
+                    mutable_data['working_hours'] = json.loads(wh_value)
+                except json.JSONDecodeError:
+                    mutable_data['working_hours'] = []
+
+        return super().to_internal_value(mutable_data)
 
     def create(self, validated_data):
         working_hours_data = validated_data.pop('working_hours', [])
+        categories = validated_data.pop('categories', [])
+
         business = super().create(validated_data)
 
+        # Add categories
+        if categories:
+            business.categories.set(categories)
+
+        # Add working hours
         for wh in working_hours_data:
             BusinessWorkingHour.objects.create(business=business, **wh)
 
         return business
 
-
     def update(self, instance, validated_data):
         working_hours_data = validated_data.pop('working_hours', None)
+        categories = validated_data.pop('categories', None)
 
-        business = super().update(instance, validated_data)
+        # Update categories if provided
+        if categories is not None:
+            instance.categories.set(categories)
 
+        # Update business instance
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update working hours if provided
         if working_hours_data is not None:
             # Clear old working hours
             instance.working_hours.all().delete()
-
-            # Recreate new ones
+            # Create new ones
             for wh in working_hours_data:
                 BusinessWorkingHour.objects.create(business=instance, **wh)
 
-        return business
+        return instance
 
 
 

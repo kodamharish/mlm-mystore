@@ -10,6 +10,7 @@ class PropertyFilter(django_filters.FilterSet):
     # Keyword Search
     # -------------------------------------------------
     keyword = django_filters.CharFilter(method='filter_keyword')
+    search = django_filters.CharFilter(method='filter_keyword')
 
     # -------------------------------------------------
     # Category & Property Type

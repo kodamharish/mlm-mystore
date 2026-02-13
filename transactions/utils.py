@@ -18,6 +18,10 @@ from django.conf import settings
 from io import BytesIO
 from datetime import datetime
 import os
+from reportlab.platypus import Table, TableStyle, Paragraph, Frame
+from reportlab.pdfgen import canvas
+
+
 
 
 
@@ -387,15 +391,18 @@ def generate_subscription_invoice_pdf(transaction, user, variant, doc_number):
 
 
 
-def format_variant_attributes(attrs):
+
+
+
+
+
+def format_variant_attributes_old(attrs):
     if not attrs:
         return "-"
 
-    # if stored as dict: {"Color": "Red", "Size": "XL"}
     if isinstance(attrs, dict):
         return " / ".join(f"{k}: {v}" for k, v in attrs.items())
 
-    # if stored as list: [{"Color": "Red"}, {"Size": "XL"}]
     if isinstance(attrs, list):
         kv_pairs = []
         for d in attrs:
@@ -404,22 +411,10 @@ def format_variant_attributes(attrs):
         if kv_pairs:
             return " / ".join(kv_pairs)
 
-    # fallback for unexpected formats
     return str(attrs)
 
 
-
-
-
-
-
-
-
-
-
-
-
-def generate_product_invoice_pdf(transaction, order, user):
+def generate_product_invoice_pdf_old(transaction, order, user):
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -434,7 +429,7 @@ def generate_product_invoice_pdf(transaction, order, user):
     item_style.fontName = "Helvetica"
     item_style.fontSize = 9
     item_style.leading = 12
-    item_style.wordWrap = "CJK"
+    item_style.wordWrap = "CJK"  # important for long attributes
 
     # ================= COMPANY NAME =================
     pdf.setFont("Helvetica-Bold", 14)
@@ -511,28 +506,22 @@ def generate_product_invoice_pdf(transaction, order, user):
     info_table.wrapOn(pdf, width, height)
     info_table.drawOn(pdf, margin, height - 300)
 
-    # ================= PRODUCT TABLE =================
+    # ================= PRODUCT TABLE DATA =================
     product_table_data = [
         ["S No", "Item", "Qty", "Price", "Total"]
     ]
 
     for idx, item in enumerate(order.items.all(), start=1):
-
-        # ---------- ITEM NAME (AUTO WRAP) ----------
         if item.variant:
             product = item.variant.product
             attrs = format_variant_attributes(item.variant.attributes)
-
             item_name = Paragraph(
                 f"<b>{product.product_name}</b><br/>{attrs}",
                 item_style
             )
         else:
             p = item.property_item
-            item_name = Paragraph(
-                f"<b>{p.property_title}</b>",
-                item_style
-            )
+            item_name = Paragraph(f"<b>{p.property_title}</b>", item_style)
 
         product_table_data.append([
             str(idx),
@@ -550,7 +539,8 @@ def generate_product_invoice_pdf(transaction, order, user):
             table_width * 0.10,
             table_width * 0.20,
             table_width * 0.20,
-        ]
+        ],
+        repeatRows=1  # repeat header on new pages
     )
 
     product_table.setStyle(TableStyle([
@@ -562,19 +552,289 @@ def generate_product_invoice_pdf(transaction, order, user):
         ("FONTSIZE", (0, 0), (-1, -1), 9),
     ]))
 
-    product_table.wrapOn(pdf, width, height)
-    product_table.drawOn(pdf, margin, height - 380)
+    # ================= FRAME FOR AUTO PAGE FLOW =================
+    frame_top_y = height - 380  # same position you used before
+    frame_bottom_y = 140        # leave space for total + footer
+    frame_height = frame_top_y - frame_bottom_y
 
-    # ================= TOTAL =================
+    frame = Frame(
+        margin,
+        frame_bottom_y,
+        table_width,
+        frame_height,
+        showBoundary=0
+    )
+
+    frame.addFromList([product_table], pdf)
+
+    # ================= GRAND TOTAL =================
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawRightString(
         width - margin,
-        height - 380 - (len(product_table_data) * 20),
+        120,
         f"Grand Total: {order.total_amount:.2f}"
     )
 
     # ================= FOOTER =================
-    footer_y = height - 500
+    footer_y = 90
+    pdf.setFont("Helvetica", 9)
+    footer_lines = [
+        "For any queries, please contact",
+        "Email - shrirajproperty00@gmail.com",
+        "Contact - 9074307248",
+    ]
+
+    for i, line in enumerate(footer_lines):
+        pdf.drawString(margin, footer_y - i * 12, line)
+
+    pdf.showPage()
+    pdf.save()
+
+    buffer.seek(0)
+    transaction.document_file.save(
+        f"{transaction.document_number}.pdf",
+        ContentFile(buffer.read())
+    )
+
+
+
+
+from io import BytesIO
+from datetime import datetime
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Table, TableStyle, Paragraph, Frame
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from django.core.files.base import ContentFile
+from django.conf import settings
+import os
+
+
+def format_variant_attributes(attrs):
+    if not attrs:
+        return "-"
+
+    if isinstance(attrs, dict):
+        return " / ".join(f"{k}: {v}" for k, v in attrs.items())
+
+    if isinstance(attrs, list):
+        kv_pairs = []
+        for d in attrs:
+            if isinstance(d, dict):
+                kv_pairs.extend(f"{k}: {v}" for k, v in d.items())
+        if kv_pairs:
+            return " / ".join(kv_pairs)
+
+    return str(attrs)
+
+
+def format_address_block(addr):
+    if not addr:
+        return ["-"]
+
+    lines = [
+        addr.full_name,
+        addr.phone,
+        addr.address_line1,
+    ]
+
+    if addr.address_line2:
+        lines.append(addr.address_line2)
+
+    lines.extend([
+        f"{addr.city}, {addr.state} - {addr.pincode}",
+        addr.country or "India"
+    ])
+
+    return lines
+
+
+def generate_product_invoice_pdf(transaction, order, user):
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    margin = 40
+    table_width = width - 2 * margin
+
+    # =================================================
+    # PARAGRAPH STYLE (FOR AUTO WRAPPING ITEM COLUMN)
+    # =================================================
+    styles = getSampleStyleSheet()
+    item_style = styles["Normal"]
+    item_style.fontName = "Helvetica"
+    item_style.fontSize = 9
+    item_style.leading = 12
+    item_style.wordWrap = "CJK"
+
+    # ================= FETCH ADDRESSES =================
+    shipping_addr = order.addresses.filter(address_type="shipping").first()
+    billing_addr = order.addresses.filter(address_type="billing").first() or shipping_addr
+
+    shipping_lines = format_address_block(shipping_addr)
+    billing_lines = format_address_block(billing_addr)
+
+    # ================= COMPANY NAME =================
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawCentredString(
+        width / 2,
+        height - 50,
+        "SHRIRAJ PROPERTY SOLUTIONS PRIVATE LIMITED"
+    )
+
+    # ================= HEADER =================
+    pdf.setFont("Helvetica", 9)
+
+    # Address (Left - Company)
+    left_texts = [
+        "50/4,",
+        "Atal Chowk, Main Road Boria Khurd,",
+        "Near Durga Mandir, Raipur,",
+        "Chhattisgarh, 492017,",
+        "India"
+    ]
+    for i, line in enumerate(left_texts):
+        pdf.drawString(margin, height - 120 - i * 12, line)
+
+    # Logo (Center)
+    logo_path = os.path.join(settings.BASE_DIR, "static/images/logo.png")
+    if os.path.exists(logo_path):
+        pdf.drawImage(
+            logo_path,
+            (width - 100) / 2 - 30,
+            height - 190,
+            width=100,
+            height=100,
+            mask="auto"
+        )
+
+    # GST & Contact (Right)
+    right_texts = [
+        "GSTN 22ABDCS6806R2ZV",
+        "9074307248",
+        "shrirajproperty00@gmail.com",
+        "shrirajteam.com"
+    ]
+    for i, line in enumerate(right_texts):
+        pdf.drawRightString(width - margin, height - 120 - i * 12, line)
+
+    # ================= TAX INVOICE =================
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawRightString(width - margin, height - 180, "Tax Invoice")
+
+    # ================= INVOICE INFO =================
+    pdf.setFont("Helvetica", 9)
+    info_data = [
+        ["Invoice No", transaction.document_number, "Name", f"{user.first_name} {user.last_name}"],
+        ["Invoice Date", datetime.today().strftime('%d/%m/%Y'), "Email", user.email],
+        ["Phone", getattr(user, "phone_number", ""), "", ""],
+    ]
+
+    info_table = Table(
+        info_data,
+        colWidths=[
+            table_width * 0.20,
+            table_width * 0.30,
+            table_width * 0.15,
+            table_width * 0.35,
+        ]
+    )
+
+    info_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+
+    info_table.wrapOn(pdf, width, height)
+    info_table.drawOn(pdf, margin, height - 300)
+
+    # ================= SHIPPING & BILLING =================
+    y_addr = height - 360
+
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(margin, y_addr, "Shipping Address:")
+    pdf.drawString(width / 2 + 10, y_addr, "Billing Address:")
+
+    pdf.setFont("Helvetica", 9)
+
+    for i, line in enumerate(shipping_lines):
+        pdf.drawString(margin, y_addr - 15 - i * 12, line)
+
+    for i, line in enumerate(billing_lines):
+        pdf.drawString(width / 2 + 10, y_addr - 15 - i * 12, line)
+
+    # ================= PRODUCT TABLE DATA =================
+    product_table_data = [
+        ["S No", "Item", "Qty", "Price", "Total"]
+    ]
+
+    for idx, item in enumerate(order.items.all(), start=1):
+        if item.variant:
+            product = item.variant.product
+            attrs = format_variant_attributes(item.variant.attributes)
+            item_name = Paragraph(
+                f"<b>{product.product_name}</b><br/>{attrs}",
+                item_style
+            )
+        else:
+            p = item.property_item
+            item_name = Paragraph(f"<b>{p.property_title}</b>", item_style)
+
+        product_table_data.append([
+            str(idx),
+            item_name,
+            str(item.quantity),
+            f"{item.price:.2f}",
+            f"{(item.price * item.quantity):.2f}"
+        ])
+
+    product_table = Table(
+        product_table_data,
+        colWidths=[
+            table_width * 0.08,
+            table_width * 0.42,
+            table_width * 0.10,
+            table_width * 0.20,
+            table_width * 0.20,
+        ],
+        repeatRows=1
+    )
+
+    product_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (2, 1), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+
+    # ================= FRAME FOR AUTO PAGE FLOW =================
+    frame_top_y = height - 520
+    frame_bottom_y = 140
+    frame_height = frame_top_y - frame_bottom_y
+
+    frame = Frame(
+        margin,
+        frame_bottom_y,
+        table_width,
+        frame_height,
+        showBoundary=0
+    )
+
+    frame.addFromList([product_table], pdf)
+
+    # ================= GRAND TOTAL =================
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawRightString(
+        width - margin,
+        120,
+        f"Grand Total: {order.total_amount:.2f}"
+    )
+
+    # ================= FOOTER =================
+    footer_y = 90
     pdf.setFont("Helvetica", 9)
     footer_lines = [
         "For any queries, please contact",

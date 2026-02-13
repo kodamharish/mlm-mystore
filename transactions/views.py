@@ -252,7 +252,8 @@ class OrderListAPIView(APIView):
             if not filterset.is_valid():
                 return Response(filterset.errors, status=400)
 
-            filtered_qs = filterset.qs
+            #filtered_qs = filterset.qs
+            filtered_qs = filterset.qs.distinct()
 
             paginator = GlobalPagination()
             paginated_qs = paginator.paginate_queryset(

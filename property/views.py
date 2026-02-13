@@ -423,6 +423,7 @@ class NotificationListView(APIView):
                 if notification.product_variant:
                     product_data = {
                         "variant_id": notification.product_variant.id,
+                        "product_id": notification.product.product_id,
                         "product_name": notification.product_variant.product.product_name
                     }
 

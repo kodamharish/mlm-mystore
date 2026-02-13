@@ -6,11 +6,17 @@ from business.models import *
 
 
 class Order(models.Model):
+    # ORDER_STATUS_CHOICES = (
+    #     ('pending', 'Pending'),
+    #     ('paid', 'Paid'),
+    #     ('cancelled', 'Cancelled'),
+    #     ('refunded', 'Refunded'),
+    # )
     ORDER_STATUS_CHOICES = (
         ('pending', 'Pending'),
-        ('paid', 'Paid'),
+        ('shipped', 'Shipped'),
+        ('delivered', 'Delivered'),
         ('cancelled', 'Cancelled'),
-        ('refunded', 'Refunded'),
     )
 
     order_id = models.AutoField(primary_key=True)
@@ -124,6 +130,7 @@ class Transaction(models.Model):
     payment_type = models.CharField(max_length=100, blank=True, null=True)  # e.g., 'booking-amount', 'full-amount'
     paid_amount = models.DecimalField(max_digits=15, decimal_places=2)
     payment_mode = models.CharField(max_length=100, blank=True, null=True)
+    payment_method = models.CharField(max_length=100, blank=True, null=True)
     status = models.CharField(
         max_length=20,
         choices=[
@@ -187,3 +194,33 @@ class UserProperty(models.Model):
 
 
 
+
+class OrderAddress(models.Model):
+    ADDRESS_TYPE_CHOICES = (
+        ("shipping", "Shipping"),
+        ("billing", "Billing"),
+    )
+
+    order = models.ForeignKey(
+        "transactions.Order",
+        on_delete=models.CASCADE,
+        related_name="addresses"
+    )
+
+    address_type = models.CharField(max_length=20, choices=ADDRESS_TYPE_CHOICES)
+
+    full_name = models.CharField(max_length=150)
+    phone = models.CharField(max_length=20)
+
+    address_line1 = models.CharField(max_length=255)
+    address_line2 = models.CharField(max_length=255, blank=True, null=True)
+
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    pincode = models.CharField(max_length=20)
+    country = models.CharField(max_length=100, default="India")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.address_type.title()} - Order #{self.order.order_id}"

@@ -1966,7 +1966,7 @@ class CartListCreateView(APIView):
                 Cart.objects
                 .select_related("variant", "property_item", "user")
                 .all()
-            )
+            ).order_by('-id')
 
             if user_id:
                 carts_qs = carts_qs.filter(user_id=user_id)
@@ -1997,78 +1997,195 @@ class CartListCreateView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    # def post(self, request):
+    #     try:
+    #         user_id = request.data.get("user")
+    #         variant_id = request.data.get("variant")
+    #         property_id = request.data.get("property_item")
+    #         quantity = int(request.data.get("quantity", 1))
+
+    #         if not user_id:
+    #             return Response(
+    #                 {"error": "user is required"},
+    #                 status=status.HTTP_400_BAD_REQUEST
+    #             )
+
+    #         # PRODUCT VARIANT CART
+    #         if variant_id:
+    #             variant = get_object_or_404(ProductVariant, id=variant_id)
+
+    #             if quantity < 1:
+    #                 return Response(
+    #                     {"error": "Quantity must be at least 1"},
+    #                     status=status.HTTP_400_BAD_REQUEST
+    #                 )
+
+    #             if variant.stock < quantity:
+    #                 return Response(
+    #                     {"error": "Insufficient stock"},
+    #                     status=status.HTTP_400_BAD_REQUEST
+    #                 )
+
+    #             cart_item, created = Cart.objects.get_or_create(
+    #                 user_id=user_id,
+    #                 variant=variant,
+    #                 defaults={"quantity": quantity}
+    #             )
+
+    #             if not created:
+    #                 new_qty = cart_item.quantity + quantity
+    #                 if variant.stock < new_qty:
+    #                     return Response(
+    #                         {"error": "Insufficient stock"},
+    #                         status=status.HTTP_400_BAD_REQUEST
+    #                     )
+    #                 cart_item.quantity = new_qty
+    #                 cart_item.save()
+
+    #         # PROPERTY CART
+    #         elif property_id:
+    #             property_item = get_object_or_404(Property, property_id=property_id)
+
+    #             if Cart.objects.filter(
+    #                 user_id=user_id,
+    #                 property_item=property_item
+    #             ).exists():
+    #                 return Response(
+    #                     {"error": "Property already in cart"},
+    #                     status=status.HTTP_400_BAD_REQUEST
+    #                 )
+
+    #             Cart.objects.create(
+    #                 user_id=user_id,
+    #                 property_item=property_item,
+    #                 quantity=1
+    #             )
+
+    #         else:
+    #             return Response(
+    #                 {"error": "Variant or Property is required"},
+    #                 status=status.HTTP_400_BAD_REQUEST
+    #             )
+
+    #         return Response(
+    #             {"message": "Added to cart successfully"},
+    #             status=status.HTTP_201_CREATED
+    #         )
+
+    #     except Exception as e:
+    #         return Response(
+    #             {"error": str(e)},
+    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
+    #         )
+
     def post(self, request):
         try:
-            user_id = request.data.get("user")
-            variant_id = request.data.get("variant")
-            property_id = request.data.get("property_item")
-            quantity = int(request.data.get("quantity", 1))
+            data = request.data
 
-            if not user_id:
-                return Response(
-                    {"error": "user is required"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            # PRODUCT VARIANT CART
-            if variant_id:
-                variant = get_object_or_404(ProductVariant, id=variant_id)
-
-                if quantity < 1:
-                    return Response(
-                        {"error": "Quantity must be at least 1"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-                if variant.stock < quantity:
-                    return Response(
-                        {"error": "Insufficient stock"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-                cart_item, created = Cart.objects.get_or_create(
-                    user_id=user_id,
-                    variant=variant,
-                    defaults={"quantity": quantity}
-                )
-
-                if not created:
-                    new_qty = cart_item.quantity + quantity
-                    if variant.stock < new_qty:
-                        return Response(
-                            {"error": "Insufficient stock"},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
-                    cart_item.quantity = new_qty
-                    cart_item.save()
-
-            # PROPERTY CART
-            elif property_id:
-                property_item = get_object_or_404(Property, property_id=property_id)
-
-                if Cart.objects.filter(
-                    user_id=user_id,
-                    property_item=property_item
-                ).exists():
-                    return Response(
-                        {"error": "Property already in cart"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-                Cart.objects.create(
-                    user_id=user_id,
-                    property_item=property_item,
-                    quantity=1
-                )
-
+            # 🔹 If a single object is sent, wrap it into a list
+            if isinstance(data, dict):
+                items = [data]
+            elif isinstance(data, list):
+                items = data
             else:
                 return Response(
-                    {"error": "Variant or Property is required"},
+                    {"error": "Invalid payload format"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            results = []
+
+            for item in items:
+                user_id = item.get("user")
+                variant_id = item.get("variant")
+                property_id = item.get("property_item")
+                quantity = int(item.get("quantity", 1))
+
+                if not user_id:
+                    return Response(
+                        {"error": "user is required"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # =======================
+                # PRODUCT VARIANT CART
+                # =======================
+                if variant_id:
+                    variant = get_object_or_404(ProductVariant, id=variant_id)
+
+                    if quantity < 1:
+                        return Response(
+                            {"error": "Quantity must be at least 1"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    if variant.stock < quantity:
+                        return Response(
+                            {"error": f"Insufficient stock for variant {variant_id}"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    cart_item, created = Cart.objects.get_or_create(
+                        user_id=user_id,
+                        variant=variant,
+                        defaults={"quantity": quantity}
+                    )
+
+                    if not created:
+                        new_qty = cart_item.quantity + quantity
+                        if variant.stock < new_qty:
+                            return Response(
+                                {"error": f"Insufficient stock for variant {variant_id}"},
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+                        cart_item.quantity = new_qty
+                        cart_item.save()
+
+                    results.append({
+                        "type": "variant",
+                        "variant": variant_id,
+                        "quantity": quantity,
+                        "status": "added"
+                    })
+
+                # =======================
+                # PROPERTY CART
+                # =======================
+                elif property_id:
+                    property_item = get_object_or_404(Property, property_id=property_id)
+
+                    if Cart.objects.filter(
+                        user_id=user_id,
+                        property_item=property_item
+                    ).exists():
+                        return Response(
+                            {"error": f"Property {property_id} already in cart"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                    Cart.objects.create(
+                        user_id=user_id,
+                        property_item=property_item,
+                        quantity=1
+                    )
+
+                    results.append({
+                        "type": "property",
+                        "property": property_id,
+                        "status": "added"
+                    })
+
+                else:
+                    return Response(
+                        {"error": "Variant or Property is required"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
             return Response(
-                {"message": "Added to cart successfully"},
+                {
+                    "message": "Items added to cart successfully",
+                    "results": results
+                },
                 status=status.HTTP_201_CREATED
             )
 

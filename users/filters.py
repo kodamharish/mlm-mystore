@@ -9,6 +9,7 @@ class UserFilter(django_filters.FilterSet):
     # 🔍 Keyword Search (Global)
     # -------------------------------------------------
     keyword = django_filters.CharFilter(method='filter_keyword')
+    search = django_filters.CharFilter(method='filter_keyword')
 
     # -------------------------------------------------
     # Role

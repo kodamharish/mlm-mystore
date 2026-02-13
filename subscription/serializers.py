@@ -31,11 +31,14 @@ class SubscriptionPlanVariantSerializer(serializers.ModelSerializer):
         ]
 
 
-# Serializer for Subscriptions by users
 class SubscriptionSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source='user_id.email', read_only=True)
-    plan_name = serializers.CharField(source='subscription_variant.plan.plan_name', read_only=True)
-    duration_in_days = serializers.IntegerField(source='subscription_variant.duration_in_days', read_only=True)
+    plan_name = serializers.CharField(
+        source='subscription_variant.plan_id.plan_name', read_only=True
+    )
+    duration_in_days = serializers.IntegerField(
+        source='subscription_variant.duration_in_days', read_only=True
+    )
 
     class Meta:
         model = Subscription
@@ -47,12 +50,10 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             'plan_name',
             'duration_in_days',
             'subscription_status',
-            'subscription_start_date',
-            'subscription_end_date'
+            'subscription_start_datetime',   # ✅ correct
+            'subscription_end_datetime',     # ✅ correct
         ]
         extra_kwargs = {
-            'subscription_end_date': {'read_only': True},  # <- Don't accept in payload
-            'subscription_start_date': {'read_only': True},  # Optional
+            'subscription_start_datetime': {'read_only': True},
+            'subscription_end_datetime': {'read_only': True},
         }
-
-    
