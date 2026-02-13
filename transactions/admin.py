@@ -5,3 +5,5 @@ admin.site.register(Transaction)
 admin.site.register(UserProperty)
 admin.site.register(Order)
 admin.site.register(OrderItem)
+admin.site.register(OrderAddress)
+
