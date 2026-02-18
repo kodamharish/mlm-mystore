@@ -20,9 +20,9 @@ class SubscriptionFilter(django_filters.FilterSet):
         )
 
     # -------------------------------------------------
-    # USER FILTERS
+    # USER FILTERS 
     # -------------------------------------------------
-    user_id = django_filters.NumberFilter(field_name="user_id__id")
+    user_id = django_filters.NumberFilter(field_name="user_id")
 
     # -------------------------------------------------
     # PLAN FILTERS
@@ -57,10 +57,10 @@ class SubscriptionFilter(django_filters.FilterSet):
     subscription_status = django_filters.CharFilter(lookup_expr="iexact")
 
     start_date_from = django_filters.DateFilter(
-        field_name="subscription_start_date", lookup_expr="gte"
+        field_name="subscription_start_datetime", lookup_expr="gte"
     )
     start_date_to = django_filters.DateFilter(
-        field_name="subscription_start_date", lookup_expr="lte"
+        field_name="subscription_start_datetime", lookup_expr="lte"
     )
 
     class Meta:

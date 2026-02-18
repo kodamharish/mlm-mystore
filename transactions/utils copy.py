@@ -390,6 +390,471 @@ def generate_subscription_invoice_pdf(transaction, user, variant, doc_number):
 
 
 
+
+
+
+
+
+
+def format_variant_attributes_old(attrs):
+    if not attrs:
+        return "-"
+
+    if isinstance(attrs, dict):
+        return " / ".join(f"{k}: {v}" for k, v in attrs.items())
+
+    if isinstance(attrs, list):
+        kv_pairs = []
+        for d in attrs:
+            if isinstance(d, dict):
+                kv_pairs.extend(f"{k}: {v}" for k, v in d.items())
+        if kv_pairs:
+            return " / ".join(kv_pairs)
+
+    return str(attrs)
+
+
+def generate_product_invoice_pdf_old(transaction, order, user):
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    margin = 40
+    table_width = width - 2 * margin
+
+    # =================================================
+    # PARAGRAPH STYLE (FOR AUTO WRAPPING ITEM COLUMN)
+    # =================================================
+    styles = getSampleStyleSheet()
+    item_style = styles["Normal"]
+    item_style.fontName = "Helvetica"
+    item_style.fontSize = 9
+    item_style.leading = 12
+    item_style.wordWrap = "CJK"  # important for long attributes
+
+    # ================= COMPANY NAME =================
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawCentredString(
+        width / 2,
+        height - 50,
+        "SHRIRAJ PROPERTY SOLUTIONS PRIVATE LIMITED"
+    )
+
+    # ================= HEADER =================
+    pdf.setFont("Helvetica", 9)
+
+    # Address (Left)
+    left_texts = [
+        "50/4,",
+        "Atal Chowk, Main Road Boria Khurd,",
+        "Near Durga Mandir, Raipur,",
+        "Chhattisgarh, 492017,",
+        "India"
+    ]
+    for i, line in enumerate(left_texts):
+        pdf.drawString(margin, height - 120 - i * 12, line)
+
+    # Logo (Center)
+    logo_path = os.path.join(settings.BASE_DIR, "static/images/logo.png")
+    if os.path.exists(logo_path):
+        pdf.drawImage(
+            logo_path,
+            (width - 100) / 2 - 30,
+            height - 190,
+            width=100,
+            height=100,
+            mask="auto"
+        )
+
+    # GST & Contact (Right)
+    right_texts = [
+        "GSTN 22ABDCS6806R2ZV",
+        "9074307248",
+        "shrirajproperty00@gmail.com",
+        "shrirajteam.com"
+    ]
+    for i, line in enumerate(right_texts):
+        pdf.drawRightString(width - margin, height - 120 - i * 12, line)
+
+    # ================= TAX INVOICE =================
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawRightString(width - margin, height - 180, "Tax Invoice")
+
+    # ================= INVOICE INFO =================
+    pdf.setFont("Helvetica", 9)
+    info_data = [
+        ["Invoice No", transaction.document_number, "Name", f"{user.first_name} {user.last_name}"],
+        ["Invoice Date", datetime.today().strftime('%d/%m/%Y'), "Email", user.email],
+        ["Phone", getattr(user, "phone_number", ""), "", ""],
+    ]
+
+    info_table = Table(
+        info_data,
+        colWidths=[
+            table_width * 0.20,
+            table_width * 0.30,
+            table_width * 0.15,
+            table_width * 0.35,
+        ]
+    )
+
+    info_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+
+    info_table.wrapOn(pdf, width, height)
+    info_table.drawOn(pdf, margin, height - 300)
+
+    # ================= PRODUCT TABLE DATA =================
+    product_table_data = [
+        ["S No", "Item", "Qty", "Price", "Total"]
+    ]
+
+    for idx, item in enumerate(order.items.all(), start=1):
+        if item.variant:
+            product = item.variant.product
+            attrs = format_variant_attributes(item.variant.attributes)
+            item_name = Paragraph(
+                f"<b>{product.product_name}</b><br/>{attrs}",
+                item_style
+            )
+        else:
+            p = item.property_item
+            item_name = Paragraph(f"<b>{p.property_title}</b>", item_style)
+
+        product_table_data.append([
+            str(idx),
+            item_name,
+            str(item.quantity),
+            f"{item.price:.2f}",
+            f"{(item.price * item.quantity):.2f}"
+        ])
+
+    product_table = Table(
+        product_table_data,
+        colWidths=[
+            table_width * 0.08,
+            table_width * 0.42,
+            table_width * 0.10,
+            table_width * 0.20,
+            table_width * 0.20,
+        ],
+        repeatRows=1  # repeat header on new pages
+    )
+
+    product_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (2, 1), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+
+    # ================= FRAME FOR AUTO PAGE FLOW =================
+    frame_top_y = height - 380  # same position you used before
+    frame_bottom_y = 140        # leave space for total + footer
+    frame_height = frame_top_y - frame_bottom_y
+
+    frame = Frame(
+        margin,
+        frame_bottom_y,
+        table_width,
+        frame_height,
+        showBoundary=0
+    )
+
+    frame.addFromList([product_table], pdf)
+
+    # ================= GRAND TOTAL =================
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawRightString(
+        width - margin,
+        120,
+        f"Grand Total: {order.total_amount:.2f}"
+    )
+
+    # ================= FOOTER =================
+    footer_y = 90
+    pdf.setFont("Helvetica", 9)
+    footer_lines = [
+        "For any queries, please contact",
+        "Email - shrirajproperty00@gmail.com",
+        "Contact - 9074307248",
+    ]
+
+    for i, line in enumerate(footer_lines):
+        pdf.drawString(margin, footer_y - i * 12, line)
+
+    pdf.showPage()
+    pdf.save()
+
+    buffer.seek(0)
+    transaction.document_file.save(
+        f"{transaction.document_number}.pdf",
+        ContentFile(buffer.read())
+    )
+
+
+
+
+from io import BytesIO
+from datetime import datetime
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Table, TableStyle, Paragraph, Frame
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from django.core.files.base import ContentFile
+from django.conf import settings
+import os
+
+
+def format_variant_attributes_new1(attrs):
+    if not attrs:
+        return "-"
+
+    if isinstance(attrs, dict):
+        return " / ".join(f"{k}: {v}" for k, v in attrs.items())
+
+    if isinstance(attrs, list):
+        kv_pairs = []
+        for d in attrs:
+            if isinstance(d, dict):
+                kv_pairs.extend(f"{k}: {v}" for k, v in d.items())
+        if kv_pairs:
+            return " / ".join(kv_pairs)
+
+    return str(attrs)
+
+
+def format_address_block_new1(addr):
+    if not addr:
+        return ["-"]
+
+    lines = [
+        addr.full_name,
+        addr.phone,
+        addr.address_line1,
+    ]
+
+    if addr.address_line2:
+        lines.append(addr.address_line2)
+
+    lines.extend([
+        f"{addr.city}, {addr.state} - {addr.pincode}",
+        addr.country or "India"
+    ])
+
+    return lines
+
+
+def generate_product_invoice_pdf_new1(transaction, order, user):
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    margin = 40
+    table_width = width - 2 * margin
+
+    # =================================================
+    # PARAGRAPH STYLE (FOR AUTO WRAPPING ITEM COLUMN)
+    # =================================================
+    styles = getSampleStyleSheet()
+    item_style = styles["Normal"]
+    item_style.fontName = "Helvetica"
+    item_style.fontSize = 9
+    item_style.leading = 12
+    item_style.wordWrap = "CJK"
+
+    # ================= FETCH ADDRESSES =================
+    shipping_addr = order.addresses.filter(address_type="shipping").first()
+    billing_addr = order.addresses.filter(address_type="billing").first() or shipping_addr
+
+    shipping_lines = format_address_block(shipping_addr)
+    billing_lines = format_address_block(billing_addr)
+
+    # ================= COMPANY NAME =================
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawCentredString(
+        width / 2,
+        height - 50,
+        "SHRIRAJ PROPERTY SOLUTIONS PRIVATE LIMITED"
+    )
+
+    # ================= HEADER =================
+    pdf.setFont("Helvetica", 9)
+
+    # Address (Left - Company)
+    left_texts = [
+        "50/4,",
+        "Atal Chowk, Main Road Boria Khurd,",
+        "Near Durga Mandir, Raipur,",
+        "Chhattisgarh, 492017,",
+        "India"
+    ]
+    for i, line in enumerate(left_texts):
+        pdf.drawString(margin, height - 120 - i * 12, line)
+
+    # Logo (Center)
+    logo_path = os.path.join(settings.BASE_DIR, "static/images/logo.png")
+    if os.path.exists(logo_path):
+        pdf.drawImage(
+            logo_path,
+            (width - 100) / 2 - 30,
+            height - 190,
+            width=100,
+            height=100,
+            mask="auto"
+        )
+
+    # GST & Contact (Right)
+    right_texts = [
+        "GSTN 22ABDCS6806R2ZV",
+        "9074307248",
+        "shrirajproperty00@gmail.com",
+        "shrirajteam.com"
+    ]
+    for i, line in enumerate(right_texts):
+        pdf.drawRightString(width - margin, height - 120 - i * 12, line)
+
+    # ================= TAX INVOICE =================
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawRightString(width - margin, height - 180, "Tax Invoice")
+
+    # ================= INVOICE INFO =================
+    pdf.setFont("Helvetica", 9)
+    info_data = [
+        ["Invoice No", transaction.document_number, "Name", f"{user.first_name} {user.last_name}"],
+        ["Invoice Date", datetime.today().strftime('%d/%m/%Y'), "Email", user.email],
+        ["Phone", getattr(user, "phone_number", ""), "", ""],
+    ]
+
+    info_table = Table(
+        info_data,
+        colWidths=[
+            table_width * 0.20,
+            table_width * 0.30,
+            table_width * 0.15,
+            table_width * 0.35,
+        ]
+    )
+
+    info_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+
+    info_table.wrapOn(pdf, width, height)
+    info_table.drawOn(pdf, margin, height - 300)
+
+    # ================= SHIPPING & BILLING =================
+    y_addr = height - 360
+
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(margin, y_addr, "Shipping Address:")
+    pdf.drawString(width / 2 + 10, y_addr, "Billing Address:")
+
+    pdf.setFont("Helvetica", 9)
+
+    for i, line in enumerate(shipping_lines):
+        pdf.drawString(margin, y_addr - 15 - i * 12, line)
+
+    for i, line in enumerate(billing_lines):
+        pdf.drawString(width / 2 + 10, y_addr - 15 - i * 12, line)
+
+    # ================= PRODUCT TABLE DATA =================
+    product_table_data = [
+        ["S No", "Item", "Qty", "Price", "Total"]
+    ]
+
+    for idx, item in enumerate(order.items.all(), start=1):
+        if item.variant:
+            product = item.variant.product
+            attrs = format_variant_attributes(item.variant.attributes)
+            item_name = Paragraph(
+                f"<b>{product.product_name}</b><br/>{attrs}",
+                item_style
+            )
+        else:
+            p = item.property_item
+            item_name = Paragraph(f"<b>{p.property_title}</b>", item_style)
+
+        product_table_data.append([
+            str(idx),
+            item_name,
+            str(item.quantity),
+            f"{item.price:.2f}",
+            f"{(item.price * item.quantity):.2f}"
+        ])
+
+    product_table = Table(
+        product_table_data,
+        colWidths=[
+            table_width * 0.08,
+            table_width * 0.42,
+            table_width * 0.10,
+            table_width * 0.20,
+            table_width * 0.20,
+        ],
+        repeatRows=1
+    )
+
+    product_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (2, 1), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+
+    # ================= FRAME FOR AUTO PAGE FLOW =================
+    frame_top_y = height - 520
+    frame_bottom_y = 140
+    frame_height = frame_top_y - frame_bottom_y
+
+    frame = Frame(
+        margin,
+        frame_bottom_y,
+        table_width,
+        frame_height,
+        showBoundary=0
+    )
+
+    frame.addFromList([product_table], pdf)
+
+    # ================= GRAND TOTAL =================
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawRightString(
+        width - margin,
+        120,
+        f"Grand Total: {order.total_amount:.2f}"
+    )
+
+    # ================= FOOTER =================
+    footer_y = 90
+    pdf.setFont("Helvetica", 9)
+    footer_lines = [
+        "For any queries, please contact",
+        "Email - shrirajproperty00@gmail.com",
+        "Contact - 9074307248",
+    ]
+
+    for i, line in enumerate(footer_lines):
+        pdf.drawString(margin, footer_y - i * 12, line)
+
+    pdf.showPage()
+    pdf.save()
+
+    buffer.seek(0)
+    transaction.document_file.save(
+        f"{transaction.document_number}.pdf",
+        ContentFile(buffer.read())
+    )
+
+
 import os
 from datetime import datetime
 from django.conf import settings
@@ -439,27 +904,8 @@ def format_address_block(addr):
     return "<br/>".join(lines)
 
 
-def format_offer(variant):
-    if not variant.offer or not variant.offer.is_active:
-        return "0"
 
-    offer = variant.offer
-
-    if offer.offer_type == "discount_percent" and offer.value:
-        return f"{offer.value:.0f}%"
-
-    if offer.offer_type == "discount_flat" and offer.value:
-        return f"₹{offer.value:.2f}"
-
-    if offer.offer_type == "buy_x_get_y" and offer.x_quantity and offer.y_quantity:
-        return f"B{offer.x_quantity}G{offer.y_quantity}"
-
-    if offer.offer_type == "free_gift":
-        return "FREE GIFT"
-
-    return "0"
-
-def generate_product_invoice_pdf_old(transaction, order, user):
+def generate_product_invoice_pdf(transaction, order, user):
     buffer = BytesIO()
 
     doc = SimpleDocTemplate(
@@ -527,7 +973,7 @@ def generate_product_invoice_pdf_old(transaction, order, user):
     ]))
 
     # ================= GST INVOICE ROW =================
-    gst_row = Table([[Paragraph("<b>INVOICE</b>", center)]], colWidths=[doc.width])
+    gst_row = Table([[Paragraph("<b>GST INVOICE</b>", center)]], colWidths=[doc.width])
     gst_row.setStyle(TableStyle([
         ("GRID", (0,0), (-1,-1), 1, colors.black),
         ("BACKGROUND", (0,0), (-1,-1), colors.whitesmoke),
@@ -675,252 +1121,3 @@ def generate_product_invoice_pdf_old(transaction, order, user):
         f"{transaction.document_number}.pdf",
         ContentFile(buffer.read())
     )
-
-
-def generate_product_invoice_pdf(transaction, order, user):
-    buffer = BytesIO()
-
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=12,
-        leftMargin=12,
-        topMargin=12,
-        bottomMargin=12
-    )
-
-    styles = getSampleStyleSheet()
-    normal = styles["Normal"]
-    center = ParagraphStyle("center", parent=normal, alignment=TA_CENTER)
-    right = ParagraphStyle("right", parent=normal, alignment=TA_RIGHT)
-    bold = ParagraphStyle("bold", parent=normal, fontName="Helvetica-Bold")
-
-    wrap_style = ParagraphStyle(
-        "wrap",
-        parent=normal,
-        fontSize=8,
-        leading=10,
-        wordWrap="CJK"
-    )
-
-    elements = []
-
-    # ================= FETCH ADDRESSES =================
-    shipping_addr = order.addresses.filter(address_type="shipping").first()
-    billing_addr = order.addresses.filter(address_type="billing").first() or shipping_addr
-
-    shipping_html = format_address_block(shipping_addr)
-    billing_html = format_address_block(billing_addr)
-
-    # ================= HEADER =================
-    logo_path = os.path.join(settings.BASE_DIR, "static/images/logo.png")
-
-    if os.path.exists(logo_path):
-        logo = Image(logo_path, width=110, height=110)
-    else:
-        logo = Paragraph("LOGO", center)
-
-    header_info = Paragraph(
-        """
-        <b>SHRIRAJ TEAM</b><br/><br/>
-        50/4,<br/>
-        Atal Chowk, Main Road Boria Khurd,<br/>
-        Near Durga Mandir, Raipur,<br/>
-        Chhattisgarh, 492017,<br/>
-        India<br/>
-        Email: shrirajproperty00@gmail.com, Phone: 9074307248<br/>
-        GSTIN: 22ABDCS6806R2ZV
-        """,
-        center
-    )
-
-    header_table = Table([[logo, header_info]], colWidths=[120, doc.width - 120])
-    header_table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("ALIGN", (0,0), (0,0), "CENTER"),
-        ("ALIGN", (1,0), (1,0), "CENTER"),
-        ("TOPPADDING", (0,0), (-1,-1), 6),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-    ]))
-
-    # ================= GST INVOICE ROW =================
-    gst_row = Table([[Paragraph("<b>INVOICE</b>", center)]], colWidths=[doc.width])
-    gst_row.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
-        ("BACKGROUND", (0,0), (-1,-1), colors.whitesmoke),
-        ("ALIGN", (0,0), (-1,-1), "CENTER"),
-        ("TOPPADDING", (0,0), (-1,-1), 6),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-    ]))
-
-    # ================= ADDRESS TABLE =================
-    addr_table = Table([
-        [Paragraph("<b>BILLING ADDRESS</b>", bold), Paragraph("<b>SHIPPING ADDRESS</b>", bold)],
-        [Paragraph(billing_html, normal), Paragraph(shipping_html, normal)]
-    ], colWidths=[doc.width/2, doc.width/2])
-
-    addr_table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("TOPPADDING", (0,0), (-1,0), 6),
-        ("BOTTOMPADDING", (0,1), (-1,1), 24),
-    ]))
-
-    # ================= BILLED TO / INVOICE INFO =================
-    invoice_info_left = f"""
-    {user.first_name} {user.last_name}<br/>
-    {user.email}<br/>
-    {getattr(user, "phone_number", "")}
-    """
-
-    invoice_info_right = f"""
-    Date: {datetime.today().strftime('%d-%m-%Y')}<br/>
-    Number: {transaction.document_number}<br/>
-    Order No: {order.order_id}<br/>
-    Amount: {order.total_amount:.2f}
-    """
-
-    addr_table1 = Table([
-        [Paragraph("<b>BILLED TO</b>", bold), Paragraph("<b>INVOICE</b>", bold)],
-        [Paragraph(invoice_info_left, normal), Paragraph(invoice_info_right, normal)]
-    ], colWidths=[doc.width/2, doc.width/2])
-
-    addr_table1.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("TOPPADDING", (0,0), (-1,0), 6),
-        ("BOTTOMPADDING", (0,1), (-1,1), 24),
-    ]))
-
-    # ================= PRODUCT TABLE =================
-    col_widths = [25, 200, 40, 55, 35, 40, 40, 40, 55]
-
-    # product_data = [
-    #     ["#", "Product Description", "GST(%)", "RATE", "QTY", "DIS(%)", "CGST", "SGST", "IGST", "TOTAL"],
-    # ]
-    product_data = [
-        ["#", "Product Description", "GST(%)", "RATE", "QTY", "DIS(%)", "CGST", "SGST","TOTAL"],
-    ]
-
-    from decimal import Decimal
-
-    grand_total = Decimal("0.00")
-
-    for idx, item in enumerate(order.items.all(), start=1):
-        if item.variant:
-            variant = item.variant
-            product = variant.product
-            attrs = format_variant_attributes(variant.attributes)
-            desc = Paragraph(f"<b>{product.product_name}</b><br/>{attrs}", wrap_style)
-
-            qty = item.quantity
-
-            rate = Decimal(variant.selling_price or 0)          # after offer, before tax
-            gst_percent = Decimal(variant.tax_percent or 0)
-
-            cgst_amt = Decimal(variant.cgst_amount or 0)
-            sgst_amt = Decimal(variant.sgst_amount or 0)
-
-            unit_final_price = Decimal(variant.final_price or (rate + cgst_amt + sgst_amt))
-            line_total = (unit_final_price * qty).quantize(Decimal("0.01"))
-
-            offer_text = format_offer(variant)
-
-        else:
-            # Fallback for non-variant items
-            p = item.property_item
-            desc = Paragraph(f"<b>{p.property_title}</b>", wrap_style)
-
-            qty = item.quantity
-            rate = Decimal(item.price)
-            gst_percent = Decimal("0")
-            cgst_amt = Decimal("0")
-            sgst_amt = Decimal("0")
-            unit_final_price = rate
-            line_total = (unit_final_price * qty).quantize(Decimal("0.01"))
-            offer_text = "0"
-
-        grand_total += line_total
-        #igst_amt = (cgst_amt + sgst_amt).quantize(Decimal("0.01"))
-
-        product_data.append([
-            str(idx),
-            desc,
-            f"{gst_percent:.2f}",
-            f"{rate:.2f}",
-            str(qty),
-            offer_text,              # ✅ SHOW OFFER
-            f"{cgst_amt:.2f}",       # ✅ FROM DB
-            f"{sgst_amt:.2f}",       # ✅ FROM DB
-            # "0.00",                  # IGST (keep 0 or add later)
-            #f"{igst_amt:.2f}",       # ✅ IGST = CGST + SGST
-            f"{line_total:.2f}",     # ✅ FINAL PRICE * QTY
-        ])
-
-    
-
-    product_table = Table(product_data, colWidths=col_widths, repeatRows=1)
-    product_table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
-        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
-        ("ALIGN", (0,0), (-1,0), "CENTER"),
-        ("ALIGN", (2,1), (-1,-1), "RIGHT"),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("FONTSIZE", (0,0), (-1,0), 8),
-        ("FONTSIZE", (0,1), (-1,-1), 8),
-        ("LEFTPADDING", (0,0), (-1,-1), 4),
-        ("RIGHTPADDING", (0,0), (-1,-1), 4),
-    ]))
-
-    # ================= GRAND TOTAL =================
-    grand_total_table = Table(
-        [[Paragraph("<b>Grand Total</b>", right), Paragraph(f"<b>INR {grand_total:.2f}</b>", right)]],
-        colWidths=[doc.width * 0.75, doc.width * 0.25]
-    )
-
-    grand_total_table.setStyle(TableStyle([
-        ("ALIGN", (0,0), (-1,-1), "RIGHT"),
-        ("TOPPADDING", (0,0), (-1,-1), 8),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
-        ("LINEABOVE", (0,0), (-1,0), 1, colors.black),
-    ]))
-
-    # ================= FOOTER =================
-    footer = Table([[Paragraph("Thank you for your Business!", center)]], colWidths=[doc.width])
-    footer.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
-        ("ALIGN", (0,0), (-1,-1), "CENTER"),
-        ("TOPPADDING", (0,0), (-1,-1), 8),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
-    ]))
-
-    # ================= MAIN WRAPPER =================
-    main_table = Table([
-        [header_table],
-        [gst_row],
-        [addr_table],
-        [addr_table1],
-        [product_table],
-        [grand_total_table],
-        [footer],
-    ], colWidths=[doc.width])
-
-    main_table.setStyle(TableStyle([
-        ("GRID", (0,0), (-1,-1), 1, colors.black),
-        ("LEFTPADDING", (0,0), (-1,-1), 0),
-        ("RIGHTPADDING", (0,0), (-1,-1), 0),
-        ("TOPPADDING", (0,0), (-1,-1), 0),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 0),
-    ]))
-
-    elements.append(main_table)
-    doc.build(elements)
-
-    # ================= SAVE TO TRANSACTION =================
-    buffer.seek(0)
-    transaction.document_file.save(
-        f"{transaction.document_number}.pdf",
-        ContentFile(buffer.read())
-    )
-

@@ -551,7 +551,7 @@ class ProductDetailView(APIView):
         return Response(ProductSerializer(product).data, status=200)
 
     @transaction.atomic
-    def put(self, request, product_id):
+    def put_old(self, request, product_id):
         try:
             product = get_object_or_404(Product, product_id=product_id)
 
@@ -624,6 +624,106 @@ class ProductDetailView(APIView):
         except Exception as e:
             transaction.set_rollback(True)
             return Response({"error": str(e)}, status=500)
+    
+
+
+    @transaction.atomic
+    def put(self, request, product_id):
+        try:
+            product = get_object_or_404(Product, product_id=product_id)
+
+            product_data = request.data.get('product')
+            variants_data = request.data.get('variants', [])
+
+            if isinstance(product_data, str):
+                product_data = json.loads(product_data)
+            if isinstance(variants_data, str):
+                variants_data = json.loads(variants_data)
+
+            # -------------------
+            # Update product fields
+            # -------------------
+            if product_data:
+                for field, value in product_data.items():
+                    setattr(product, field, value)
+                product.save()
+
+            # -------------------
+            # Handle variants
+            # -------------------
+            for v in variants_data:
+                variant_id = v.get('id')
+                media_list = v.get('media', [])
+
+                if variant_id:
+                    # 🔁 UPDATE existing variant
+                    variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                    if not variant:
+                        continue
+
+                    old_variant_status = variant.verification_status
+
+                    for field, value in v.items():
+                        if field not in ('id', 'media'):
+                            setattr(variant, field, value)
+                    variant.save()
+
+                    # 🔥 VERIFIED FLOW
+                    if old_variant_status != "verified" and variant.verification_status == "verified":
+                        self.notify_owner_verified(variant)
+                        self.notify_agents_clients_verified(variant)
+
+                    # 🔥 REJECTED FLOW
+                    if old_variant_status != "rejected" and variant.verification_status == "rejected":
+                        self.notify_owner_rejected(variant)
+
+                else:
+                    # 🆕 CREATE new variant
+                    variant = ProductVariant.objects.create(
+                        product=product,
+                        **{k: v[k] for k in v if k != 'media'}
+                    )
+
+                # -------------------
+                # Handle media (for both new & existing variants)
+                # -------------------
+                for m in media_list:
+                    media_id = m.get('id')
+                    uploaded = request.FILES.get('media_file')
+
+                    if media_id:
+                        # 🔁 Update existing media
+                        media_obj = ProductMedia.objects.filter(
+                            id=media_id, variant=variant, product=product
+                        ).first()
+
+                        if media_obj:
+                            for field, value in m.items():
+                                if field not in ('id', 'file'):
+                                    setattr(media_obj, field, value)
+                            if uploaded:
+                                media_obj.file = uploaded
+                            media_obj.save()
+                    else:
+                        # 🆕 Create new media
+                        if uploaded:
+                            ProductMedia.objects.create(
+                                product=product,
+                                variant=variant,
+                                media_type=m.get('media_type', 'image'),
+                                file=uploaded,
+                                sort_order=m.get('sort_order', 0)
+                            )
+
+            return Response({"message": "Product updated successfully"}, status=200)
+
+        except Exception as e:
+            transaction.set_rollback(True)
+            return Response({"error": str(e)}, status=500)
+
+
+
+
 
     def delete(self, request, product_id):
         try:

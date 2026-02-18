@@ -981,7 +981,8 @@ class ProductInitiatePaymentAPIView(APIView):
                 # STEP 3: Create OrderItems
                 for item in cart_items:
                     if item.variant:
-                        price = item.variant.selling_price or item.variant.mrp
+                        #price = item.variant.selling_price or item.variant.mrp
+                        price = item.variant.final_price
                         OrderItem.objects.create(
                             order=order,
                             variant=item.variant,

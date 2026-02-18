@@ -41,6 +41,8 @@ urlpatterns = [
     path("order-summary/", OrderSummaryAPIView.as_view()),
     path("admin-summary/", AdminSummaryAPIView.as_view()),
     path("summary/", AdminSummaryAPIView.as_view()),
+
+    path("generate-invoice/", generate_invoice, name="generate_invoice"),
     
 
 

@@ -10,7 +10,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.conf import settings
 from decimal import Decimal
-
+from decimal import Decimal, ROUND_HALF_UP
 
  
 def business_upload_path(instance, filename):
@@ -311,6 +311,7 @@ class ProductVariant(models.Model):
 
     mrp = models.DecimalField(max_digits=12, decimal_places=2)
     selling_price = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    final_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00,blank=True, null=True)
 
     tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     cgst_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
@@ -318,6 +319,7 @@ class ProductVariant(models.Model):
 
     cgst_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     sgst_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    
 
     stock = models.PositiveIntegerField(default=0)
     hsn_code = models.CharField(max_length=20, blank=True, null=True)
@@ -368,28 +370,62 @@ class ProductVariant(models.Model):
         return price
 
 
+    # def save(self, *args, **kwargs):
+    #     # normalize decimals
+    #     mrp = Decimal(str(self.mrp)) if self.mrp is not None else Decimal('0')
+    #     sp = Decimal(str(self.selling_price)) if self.selling_price is not None else None
+    #     price = sp or mrp
+
+    #     cgst = Decimal(str(self.cgst_percent)) if self.cgst_percent is not None else Decimal('0')
+    #     sgst = Decimal(str(self.sgst_percent)) if self.sgst_percent is not None else Decimal('0')
+
+    #     # apply offer before tax
+    #     self.selling_price = self.apply_offer()
+
+    #     # tax calculations
+    #     self.cgst_amount = (price * cgst / Decimal('100'))
+    #     self.sgst_amount = (price * sgst / Decimal('100'))
+
+    #     # auto deactivate if product not approved
+    #     # if self.product.verification_status != 'approved':
+    #     #     self.is_active = False
+    #     if self.product.verification_status != 'verified':
+    #         self.is_active = False
+
+
+    #     super().save(*args, **kwargs)
+
+
     def save(self, *args, **kwargs):
-        # normalize decimals
+        # Normalize base price
         mrp = Decimal(str(self.mrp)) if self.mrp is not None else Decimal('0')
-        sp = Decimal(str(self.selling_price)) if self.selling_price is not None else None
-        price = sp or mrp
 
-        cgst = Decimal(str(self.cgst_percent)) if self.cgst_percent is not None else Decimal('0')
-        sgst = Decimal(str(self.sgst_percent)) if self.sgst_percent is not None else Decimal('0')
+        # 1️⃣ Apply offer on MRP (price WITHOUT tax)
+        discounted_price = Decimal(str(self.apply_offer())) if self.apply_offer() is not None else mrp
+        self.selling_price = discounted_price
 
-        # apply offer before tax
-        self.selling_price = self.apply_offer()
+        price = discounted_price
 
-        # tax calculations
-        self.cgst_amount = (price * cgst / Decimal('100'))
-        self.sgst_amount = (price * sgst / Decimal('100'))
+        # 2️⃣ Normalize tax percent
+        tax_percent = Decimal(str(self.tax_percent)) if self.tax_percent is not None else Decimal('0')
 
-        # auto deactivate if product not approved
-        # if self.product.verification_status != 'approved':
-        #     self.is_active = False
+        # 3️⃣ Split tax into CGST and SGST
+        half_tax = (tax_percent / Decimal('2')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        self.cgst_percent = half_tax
+        self.sgst_percent = half_tax
+
+        # 4️⃣ Calculate tax amounts on DISCOUNTED price
+        self.cgst_amount = (price * self.cgst_percent / Decimal('100')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        self.sgst_amount = (price * self.sgst_percent / Decimal('100')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # 5️⃣ Save FINAL PRICE (price + tax)
+        self.final_price = (price + self.cgst_amount + self.sgst_amount).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+        # 6️⃣ Auto deactivate if product not verified
         if self.product.verification_status != 'verified':
             self.is_active = False
-
 
         super().save(*args, **kwargs)
 

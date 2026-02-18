@@ -1009,3 +1009,208 @@ class AdminSummaryAPIView(APIView):
             response["user_summary"] = user_summary
 
         return Response(response)
+
+
+
+
+
+
+
+
+
+import os
+from django.conf import settings
+from django.http import JsonResponse
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Image
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+
+
+def generate_invoice(request):
+    filename = "gst_invoice.pdf"
+    file_path = os.path.join(settings.MEDIA_ROOT, filename)
+
+    doc = SimpleDocTemplate(
+        file_path,
+        pagesize=A4,
+        rightMargin=12,
+        leftMargin=12,
+        topMargin=12,
+        bottomMargin=12
+    )
+
+    styles = getSampleStyleSheet()
+    normal = styles["Normal"]
+    center = ParagraphStyle("center", parent=normal, alignment=TA_CENTER)
+    right = ParagraphStyle("right", parent=normal, alignment=TA_RIGHT)
+    bold = ParagraphStyle("bold", parent=normal, fontName="Helvetica-Bold")
+
+    # For long product names
+    wrap_style = ParagraphStyle(
+        "wrap",
+        parent=normal,
+        fontSize=8,
+        leading=10,
+        wordWrap="CJK"
+    )
+
+    elements = []
+
+    # -------------------------
+    # Header (Logo + Company Info)
+    # -------------------------
+    logo_path = os.path.join(settings.BASE_DIR, "static/images/logo.png")
+
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=120, height=120)
+    else:
+        logo = Paragraph("LOGO", center)
+
+    header_info = Paragraph(
+        """<b>SHRIRAJ TEAM</b><br/><br/>
+        50/4,<br/>
+Atal Chowk, Main Road Boria Khurd,<br/>
+Near Durga Mandir, Raipur,<br/>
+Chhattisgarh, 492017,<br/>
+India<br/>
+        Email:shrirajproperty00@gmail.com, Phone:9074307248<br/>
+        GSTIN:22ABDCS6806R2ZV
+
+        """,
+        center
+    )
+
+    header_table = Table([[logo, header_info]], colWidths=[110, doc.width - 110])
+    header_table.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("ALIGN", (0,0), (0,0), "CENTER"),
+        ("ALIGN", (1,0), (1,0), "CENTER"),
+        ("TOPPADDING", (0,0), (-1,-1), 6),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+    ]))
+
+    # -------------------------
+    # GST INVOICE Row
+    # -------------------------
+    gst_row = Table([[Paragraph("<b>GST INVOICE</b>", center)]], colWidths=[doc.width])
+    gst_row.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
+        ("BACKGROUND", (0,0), (-1,-1), colors.whitesmoke),
+        ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("TOPPADDING", (0,0), (-1,-1), 6),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+    ]))
+
+    # -------------------------
+    # Billing / Shipping
+    # -------------------------
+    addr_table = Table([
+        [Paragraph("<b>BILLING ADDRESS</b>", bold), Paragraph("<b>SHIPPING ADDRESS</b>", bold)],
+        ["6-5-90\nVidhayanagar\nRajAnna Sircilla - 560029\nTG",
+         "6-5-90\nVidhayanagar\nRajAnna Sircilla - 560029\nTG"]
+    ], colWidths=[doc.width/2, doc.width/2])
+
+    addr_table.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING", (0,0), (-1,0), 6),
+        ("BOTTOMPADDING", (0,1), (-1,1), 24),
+    ]))
+
+    addr_table1 = Table([
+        [Paragraph("<b>BILLED TO</b>", bold), Paragraph("<b>INVOICE</b>", bold)],
+        ["Harish K\nharish@gmail.com\n1234567890",
+         "Date:12-12-2026\nNumber:1234\nAmount:2020\nOrder No:1234"]
+    ], colWidths=[doc.width/2, doc.width/2])
+
+    addr_table1.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("TOPPADDING", (0,0), (-1,0), 6),
+        ("BOTTOMPADDING", (0,1), (-1,1), 24),
+    ]))
+
+    # -------------------------
+    # Product Table (PERFECT WIDTH + WRAPPING)
+    # -------------------------
+    col_widths = [25, 180, 40, 55, 35, 40, 55, 55, 40, 45]  # sums ≈ doc.width
+
+    product_data = [
+        ["#", "Product Description", "GST(%)", "RATE", "QTY", "DIS(%)", "CGST", "SGST", "IGST", "TOTAL"],
+        ["1", Paragraph("Very long product name " * 10, wrap_style), "12", "4,464.29", "1", "0", "267.86", "267.86", "0.00", "4,464.29"],
+        ["2", Paragraph("charger", wrap_style), "12", "357.14", "1", "0", "21.43", "21.43", "0.00", "357.14"],
+        ["3", Paragraph("laptop", wrap_style), "18", "59,322.03", "1", "0", "5338.98", "5338.98", "0.00", "59,322.03"],
+    ]
+
+    product_table = Table(product_data, colWidths=col_widths, repeatRows=1)
+    product_table.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
+        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+        ("ALIGN", (0,0), (-1,0), "CENTER"),
+        ("ALIGN", (2,1), (-1,-1), "RIGHT"),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("FONTSIZE", (0,0), (-1,0), 8),
+        ("FONTSIZE", (0,1), (-1,-1), 8),
+        ("LEFTPADDING", (0,0), (-1,-1), 4),
+        ("RIGHTPADDING", (0,0), (-1,-1), 4),
+    ]))
+
+    # -------------------------
+    # Grand Total (NO BORDER, RIGHT ALIGNED)
+    # -------------------------
+    grand_total_table = Table(
+        [[Paragraph("<b>Grand Total</b>", right), Paragraph("<b>INR 81814.34</b>", right)]],
+        colWidths=[doc.width * 0.75, doc.width * 0.25]
+    )
+
+    grand_total_table.setStyle(TableStyle([
+        ("ALIGN", (0,0), (-1,-1), "RIGHT"),
+        ("TOPPADDING", (0,0), (-1,-1), 8),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+        ("LINEABOVE", (0,0), (-1,0), 1, colors.black),  # only top line like your image
+    ]))
+
+    # -------------------------
+    # Footer
+    # -------------------------
+    footer = Table([[Paragraph("Thank you for your Business!", center)]], colWidths=[doc.width])
+    footer.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
+        ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("TOPPADDING", (0,0), (-1,-1), 8),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+    ]))
+
+    # -------------------------
+    # Main Wrapper
+    # -------------------------
+    main_table = Table([
+        [header_table],
+        [gst_row],
+        [addr_table],
+        [addr_table1],
+        [product_table],
+        [grand_total_table],
+        [footer],
+    ], colWidths=[doc.width])
+
+    main_table.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 1, colors.black),
+        ("LEFTPADDING", (0,0), (-1,-1), 0),
+        ("RIGHTPADDING", (0,0), (-1,-1), 0),
+        ("TOPPADDING", (0,0), (-1,-1), 0),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 0),
+    ]))
+
+    elements.append(main_table)
+    doc.build(elements)
+
+    pdf_url = request.build_absolute_uri(settings.MEDIA_URL + filename)
+
+    return JsonResponse({
+        "message": "Invoice generated",
+        "pdf_url": pdf_url
+    })

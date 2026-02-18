@@ -127,7 +127,7 @@ DATABASES = {
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.mysql',
-#         'NAME': 'mlm',
+#         'NAME': 'newlivedata',
 #         'USER': 'root',
 #         'PASSWORD': 'root',
 #         'HOST': 'localhost',

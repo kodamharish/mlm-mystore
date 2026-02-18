@@ -68,9 +68,9 @@ def update_subscription_status():
             print(f"[{timezone.now()}] Error in update_subscription_status: {e}")
 
         # Sleep for 24 hours
-        time.sleep(86400)
+        #time.sleep(86400)
         # For testing:
-        # time.sleep(10)
+        time.sleep(60)
 
 
 def start_thread():
